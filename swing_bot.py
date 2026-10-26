@@ -39,6 +39,7 @@ RISK_PCT = float(os.getenv("RISK_PCT", "0.5"))        # ryzyko na transakcję w 
 LEVERAGE = int(os.getenv("LEVERAGE", "3"))            # sugerowana dźwignia (izolowana)
 COOLDOWN_H = 12                                        # min. przerwa między sygnałami na tej samej parze
 SIGNAL_VALID_H = 2                                     # jak długo setup jest aktualny
+MAX_SIGNALS_PER_RUN = 2                                # pary są skorelowane -> maks. 2 sygnały naraz
 TREND_FAST, TREND_SLOW = 50, 200                      # EMA na 4H
 TP1_R, TP1_PART = 1.5, 0.3                             # TP1 przy 1,5R zamyka 30% pozycji
 TRAIL_ATR = 3.0                                        # trailing stop reszty = 3 x ATR(1H)
@@ -160,6 +161,7 @@ def trend_4h(k4, idx=None):
     c = [x[4] for x in k4[: idx + 1]]
     f, s = ema(c, TREND_FAST), ema(c, TREND_SLOW)
     slope = s[-1] - s[-6]
+    trend_4h.strength = abs(slope) / s[-1]                 # siła trendu (do wyboru najlepszych par)
     if f[-1] > s[-1] and c[-1] > s[-1] and slope > 0:
         return "long"
     if f[-1] < s[-1] and c[-1] < s[-1] and slope < 0:
@@ -271,7 +273,7 @@ def save_state(st):
 def run(dry=False):
     st = load_state()
     now_ms = int(time.time() * 1000)
-    sent, errors = 0, []
+    sent, errors, cands = 0, [], []
     for base in PAIRS:
         spot = f"{base}-USDT"
         try:
@@ -285,19 +287,28 @@ def run(dry=False):
                 continue
             prev = st.get(base, {})
             if prev.get("bar_ts") == s["bar_ts"]:
-                continue                                   # ten sam sygnał już wysłany
+                continue                                   # ten sam sygnał już rozpatrzony
             if now_ms - prev.get("sent_ms", 0) < COOLDOWN_H * 3600_000:
                 continue
-            inst, ct_val, tick = contract_info(base)
-            msg = build_message(base, s, inst, ct_val, tick)
-            if dry:
-                print(msg + "\n" + "-" * 40)
-            else:
-                send_telegram(msg)
-                st[base] = {"bar_ts": s["bar_ts"], "sent_ms": now_ms, "dir": s["dir"]}
-            sent += 1
+            cands.append((trend_4h.strength, base, s))
         except Exception as e:  # noqa: BLE001
             errors.append(f"{base}: {e}")
+    cands.sort(key=lambda x: x[0], reverse=True)            # najsilniejszy trend 4H pierwszy
+    skipped = [b for _, b, _ in cands[MAX_SIGNALS_PER_RUN:]]
+    for _, base, s in cands[:MAX_SIGNALS_PER_RUN]:
+        inst, ct_val, tick = contract_info(base)
+        msg = build_message(base, s, inst, ct_val, tick)
+        if skipped:
+            msg += f"\n\nTen sam sygnał dały też: {', '.join(skipped)} — pominięte (te same ruchy rynku)."
+        if dry:
+            print(msg + "\n" + "-" * 40)
+        else:
+            send_telegram(msg)
+            st[base] = {"bar_ts": s["bar_ts"], "sent_ms": now_ms, "dir": s["dir"]}
+        sent += 1
+    for _, base, s in cands[MAX_SIGNALS_PER_RUN:]:
+        if not dry:                                        # pominięte nie wrócą przy tej samej świecy
+            st[base] = {"bar_ts": s["bar_ts"], "sent_ms": st.get(base, {}).get("sent_ms", 0), "dir": s["dir"]}
     if not dry:
         save_state(st)
         # błąd tylko, gdy padło wszystko (np. brak dostępu do API) — maks. raz na 6 h
@@ -305,7 +316,10 @@ def run(dry=False):
             send_telegram("⚠️ Bot swing: brak danych z OKX.\n" + errors[0][:300])
             st["_err_ms"] = now_ms
             save_state(st)
-    print(f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC | sygnałów: {sent} | błędów: {len(errors)}")
+    summary = f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC | sygnałów: {sent} | błędów: {len(errors)}"
+    if not dry and os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch":
+        send_telegram(f"✅ Bot swing działa (test ręczny)\n{summary}\nPar sprawdzonych: {len(PAIRS) - len(errors)}/{len(PAIRS)}")
+    print(summary)
     for e in errors:
         print("  ", e)
 

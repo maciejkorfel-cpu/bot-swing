@@ -1,0 +1,42 @@
+name: Bot swing - sygnaly
+
+on:
+  schedule:
+    - cron: "4,19,34,49 * * * *"   # co 15 min (GitHub potrafi opóźnić o kilka minut)
+  workflow_dispatch:               # ręczne uruchomienie z zakładki Actions
+
+permissions:
+  contents: write                  # zapis state.json (żeby nie dublować sygnałów)
+
+concurrency:
+  group: swing-bot
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - name: Skanowanie rynku
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          CAPITAL: ${{ vars.CAPITAL || '99400' }}
+          RISK_PCT: ${{ vars.RISK_PCT || '0.5' }}
+          LEVERAGE: ${{ vars.LEVERAGE || '3' }}
+        run: python swing_bot.py
+
+      - name: Zapis stanu
+        run: |
+          git config user.name "swing-bot"
+          git config user.email "swing-bot@users.noreply.github.com"
+          git add state.json
+          git diff --cached --quiet || (git commit -m "state: $(date -u +%F_%H:%M)" && git push)

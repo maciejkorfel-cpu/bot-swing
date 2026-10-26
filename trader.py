@@ -186,13 +186,17 @@ class Trader:
                             self.x.post("/api/v5/trade/cancel-algos", [{"algoId": aid, "instId": inst}])
                         except Exception:  # noqa: BLE001
                             pass
-                pnl = ""
+                pnl, val = "", None
                 try:
                     h = self.x.get("/api/v5/account/positions-history", instType="FUTURES", instId=inst, limit="1")
                     if h:
-                        pnl = f"\nWynik: {float(h[0].get('realizedPnl') or h[0].get('pnl') or 0):+.2f} USDC"
+                        val = float(h[0].get('realizedPnl') or h[0].get('pnl') or 0)
+                        pnl = f"\nWynik: {val:+.2f} USDC"
                 except Exception:  # noqa: BLE001
                     pass
+                self.st.setdefault("_history", []).append(
+                    {"base": t["base"], "dir": t["dir"], "pnl": val, "closed_ms": int(time.time() * 1000)})
+                self.st["_history"] = self.st["_history"][-200:]
                 self.send(f"🏁 {t['base']} {t['dir'].upper()} zamknięta (demo){pnl}")
                 del trades[inst]
                 continue
@@ -206,3 +210,43 @@ class Trader:
                     self.send(f"🎯 {t['base']}: TP1 zrealizowany, SL przesunięty na wejście {t['entry']}")
                 except Exception as e:  # noqa: BLE001
                     self.send(f"⚠️ {t['base']}: TP1 zrealizowany, ale nie udało się przesunąć SL: {e}")
+
+    # ---------- podsumowanie na żądanie ----------
+    def summary(self):
+        eq, avail = self.equity()
+        live = self.positions()
+        lines = ["📊 PODSUMOWANIE (konto demo)", f"Kapitał: {eq:,.2f} USDC | wolne: {avail:,.2f} USDC".replace(",", " "), ""]
+        bot = self.st["_trades"]
+        lines.append(f"Pozycje bota: {len(bot)}/{self.max_pos}")
+        total_u = 0.0
+        for inst, t in bot.items():
+            p = live.get(inst, {})
+            u = float(p.get("upl") or 0)
+            total_u += u
+            stage = "SL na wejściu" if t.get("be") else "czeka na TP1"
+            lines.append(f"• {t['base']} {t['dir'].upper()} od {t['entry']} | teraz {p.get('markPx', '?')} | "
+                         f"{u:+.2f} USDC | {stage}")
+        manual = [p for i, p in live.items() if i not in bot]
+        if manual:
+            lines.append("")
+            lines.append("Twoje pozycje ręczne:")
+            for p in manual:
+                u = float(p.get("upl") or 0)
+                total_u += u
+                side = "SHORT" if float(p["pos"]) < 0 else "LONG"
+                lines.append(f"• {p['instId'].split('-')[0]} {side} od {p.get('avgPx')} | teraz {p.get('markPx')} | {u:+.2f} USDC")
+        lines.append(f"Niezrealizowany wynik razem: {total_u:+.2f} USDC")
+        hist = [h for h in self.st.get("_history", []) if h.get("pnl") is not None]
+        day0 = int(time.time() // 86400 * 86400 * 1000)
+        today = [h for h in hist if h["closed_ms"] >= day0]
+        lines.append("")
+        lines.append(f"Dziś zamknięte przez bota: {len(today)} | wynik {sum(h['pnl'] for h in today):+.2f} USDC")
+        if hist:
+            wins = sum(1 for h in hist if h["pnl"] > 0)
+            lines.append(f"Od startu: {len(hist)} transakcji | trafione {wins}/{len(hist)} | "
+                         f"wynik {sum(h['pnl'] for h in hist):+.2f} USDC")
+            for h in hist[-3:]:
+                lines.append(f"  · {h['base']} {h['dir'].upper()}: {h['pnl']:+.2f} USDC")
+        else:
+            lines.append("Od startu: brak zamkniętych transakcji bota")
+        return "\n".join(lines)

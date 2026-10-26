@@ -275,6 +275,28 @@ def save_state(st):
 
 
 # ------------------------------- PRZEBIEG -------------------------------
+def check_commands(st, trader):
+    """Odczytuje wiadomości wysłane do bota na Telegramie i odpowiada na komendy."""
+    if not (TG_TOKEN and TG_CHAT):
+        return
+    r = session.get(f"https://api.telegram.org/bot{TG_TOKEN}/getUpdates",
+                    params={"offset": st.get("_tg_offset", 0), "timeout": 0}, timeout=15).json()
+    for u in r.get("result", []):
+        st["_tg_offset"] = u["update_id"] + 1
+        m = u.get("message") or {}
+        if str(m.get("chat", {}).get("id")) != str(TG_CHAT):
+            continue                                       # ignoruj obcych
+        txt = (m.get("text") or "").lower()
+        if "podsum" in txt or txt.startswith("/status"):
+            if trader:
+                send_telegram(trader.summary())
+            else:
+                send_telegram("📊 Handel automatyczny jest wyłączony (brak kluczy OKX), brak pozycji bota.")
+        elif txt.startswith("/start") or "pomoc" in txt:
+            send_telegram("Komendy:\n• podsumowanie — stan konta, pozycje i wyniki bota\n"
+                          "Bot odpowiada przy najbliższym uruchomieniu (do ok. 5 min).")
+
+
 def make_trader(st):
     """Łączy się z kontem demo OKX; None, gdy brak kluczy."""
     if not (OKX_KEY and OKX_SECRET and OKX_PASSPHRASE):
@@ -305,7 +327,13 @@ def run(dry=False):
             if now_ms - st.get("_auto_err_ms", 0) > 3 * 3600_000:
                 send_telegram(f"⚠️ Bot swing: błąd handlu automatycznego\n{str(e)[:400]}")
                 st["_auto_err_ms"] = now_ms
-    for base in PAIRS:
+        try:
+            check_commands(st, trader)
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"AUTO: Telegram: {e}")
+    # nowe sygnały szukamy tylko przez 20 min po zamknięciu świecy 1H (oszczędza zapytania)
+    scan = dry or os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" or datetime.now(timezone.utc).minute < 20
+    for base in (PAIRS if scan else []):
         spot = f"{base}-USDT"
         try:
             k4 = candles(spot, "4H", 320)

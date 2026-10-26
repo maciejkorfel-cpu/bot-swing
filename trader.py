@@ -1,0 +1,208 @@
+"""
+Automatyczne składanie zleceń na koncie DEMO OKX (Handel demo).
+
+Każde zapytanie ma nagłówek x-simulated-trading: 1, więc prawdziwe konto
+nie jest używane. Klucz API trzeba utworzyć w trybie demo.
+
+Na każdą pozycję bot składa:
+  1. zlecenie rynkowe (marża izolowana, dźwignia LEVERAGE),
+  2. SL na całą pozycję (zlecenie warunkowe, tylko redukcja),
+  3. TP1 na 30% pozycji (zlecenie warunkowe, tylko redukcja),
+  4. trailing stop na 70% pozycji (aktywacja = TP1, callback z sygnału).
+Po zrealizowaniu TP1 przesuwa SL na cenę wejścia. Gdy pozycja zniknie,
+anuluje pozostałe zlecenia i wysyła raport.
+"""
+import base64
+import hashlib
+import hmac
+import json
+import math
+import os
+import time
+from datetime import datetime, timezone
+
+DEMO_HEADER = {"x-simulated-trading": "1"}       # zawsze konto demo
+
+
+class OkxDemo:
+    def __init__(self, session, host, key, secret, passphrase):
+        self.s, self.host = session, host
+        self.key, self.secret, self.pp = key, secret, passphrase
+
+    def _req(self, method, path, params=None, body=None):
+        if params:
+            path += "?" + "&".join(f"{k}={v}" for k, v in params.items())
+        data = json.dumps(body) if body is not None else ""
+        ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.") + \
+            f"{datetime.now(timezone.utc).microsecond // 1000:03d}Z"
+        sign = base64.b64encode(hmac.new(self.secret.encode(), (ts + method + path + data).encode(),
+                                         hashlib.sha256).digest()).decode()
+        h = {"OK-ACCESS-KEY": self.key, "OK-ACCESS-SIGN": sign, "OK-ACCESS-TIMESTAMP": ts,
+             "OK-ACCESS-PASSPHRASE": self.pp, "Content-Type": "application/json", **DEMO_HEADER}
+        r = self.s.request(method, self.host + path, headers=h, data=data or None, timeout=15)
+        js = r.json()
+        if js.get("code") != "0":
+            detail = js.get("data") and js["data"][0].get("sMsg")
+            raise RuntimeError(f"OKX {path.split('?')[0]} {js.get('code')}: {js.get('msg')} {detail or ''}".strip())
+        return js["data"]
+
+    def get(self, path, **params):
+        return self._req("GET", path, params=params or None)
+
+    def post(self, path, body):
+        return self._req("POST", path, body=body)
+
+
+def _round(x, step, mode="near"):
+    n = x / step
+    n = math.floor(n + 1e-9) if mode == "down" else round(n)
+    dec = max(0, -int(math.floor(math.log10(step)))) if step < 1 else 0
+    return f"{n * step:.{dec}f}"
+
+
+class Trader:
+    def __init__(self, okx, state, send, risk_pct, leverage, max_pos):
+        self.x, self.st, self.send = okx, state, send
+        self.risk_pct, self.lev, self.max_pos = risk_pct, leverage, max_pos
+        self.st.setdefault("_trades", {})
+        cfg = self.x.get("/api/v5/account/config")[0]
+        self.hedge = cfg.get("posMode") == "long_short_mode"
+
+    # ---------- informacje o koncie ----------
+    def equity(self):
+        bal = self.x.get("/api/v5/account/balance", ccy="USDC")[0]
+        for d in bal.get("details", []):
+            if d["ccy"] == "USDC":
+                return float(d.get("eq") or 0), float(d.get("availEq") or d.get("availBal") or 0)
+        return float(bal.get("totalEq") or 0), 0.0
+
+    def positions(self):
+        return {p["instId"]: p for p in self.x.get("/api/v5/account/positions", instType="FUTURES")
+                if float(p.get("pos") or 0) != 0}
+
+    def instrument(self, base):
+        data = self.x.get("/api/v5/public/instruments", instType="FUTURES")
+        c = [d for d in data if d["instId"].startswith(f"{base}-USD_UM_XPERP") and d.get("state") == "live"]
+        return c[0] if c else None
+
+    def ticker(self, inst_id):
+        return self.x.get("/api/v5/market/ticker", instId=inst_id)[0]
+
+    # ---------- otwieranie ----------
+    def open_trade(self, base, s, spot_price):
+        """Zwraca (True, opis) albo (False, powód pominięcia)."""
+        trades = self.st["_trades"]
+        if len(trades) >= self.max_pos:
+            return False, f"limit {self.max_pos} pozycji"
+        ins = self.instrument(base)
+        if not ins:
+            return False, "brak kontraktu w demo"
+        inst = ins["instId"]
+        if inst in self.positions():
+            return False, "na tym kontrakcie jest już pozycja (np. ręczna)"
+        t = self.ticker(inst)
+        bid, ask = float(t.get("bidPx") or 0), float(t.get("askPx") or 0)
+        if not bid or not ask:
+            return False, "brak ofert w order booku demo"
+        mid = (bid + ask) / 2
+        if abs(mid / spot_price - 1) > 0.006:
+            return False, f"cena demo {mid} odbiega od rynku {spot_price}"
+        long_ = s["dir"] == "long"
+        px = ask if long_ else bid                          # przybliżona cena wejścia rynkowego
+        if (px - s["entry"]) * (1 if long_ else -1) > 0.3 * s["atr"]:
+            return False, "cena uciekła od wejścia o > 0,3 ATR"
+
+        ct, lot, tick = float(ins["ctVal"]), float(ins["lotSz"]), float(ins["tickSz"])
+        min_sz = float(ins.get("minSz") or lot)
+        sgn = 1 if long_ else -1
+        dist = abs(px - s["sl"])                            # ryzyko liczone od realnej ceny wejścia
+        eq, avail = self.equity()
+        risk = eq * self.risk_pct / 100
+        sz = float(_round(risk / dist / ct, lot, "down"))
+        if sz < min_sz:
+            return False, "za mała ilość"
+        if sz * ct * px / self.lev > avail * 0.9:
+            return False, "za mało wolnego depozytu"
+
+        tp1 = px + sgn * 1.5 * dist
+        sz_tp1 = float(_round(sz * 0.3, lot, "down"))
+        sz_trail = float(_round(sz - sz_tp1, lot, "down"))
+        side, close_side = ("buy", "sell") if long_ else ("sell", "buy")
+        pos_side = {"posSide": "long" if long_ else "short"} if self.hedge else {}
+
+        self.x.post("/api/v5/account/set-leverage",
+                    {"instId": inst, "lever": str(self.lev), "mgnMode": "isolated", **pos_side})
+        o = self.x.post("/api/v5/trade/order", {"instId": inst, "tdMode": "isolated", "side": side,
+                                                "ordType": "market", "sz": _round(sz, lot), **pos_side})[0]
+        time.sleep(1.5)
+        pos = self.positions().get(inst)
+        if not pos:
+            raise RuntimeError(f"zlecenie {o.get('ordId')} nie otworzyło pozycji")
+        entry = float(pos["avgPx"])
+        real_sz = abs(float(pos["pos"]))
+        sl = entry - sgn * dist
+        tp1 = entry + sgn * 1.5 * dist
+
+        def algo(body):
+            b = {"instId": inst, "tdMode": "isolated", "side": close_side, **pos_side, **body}
+            if not self.hedge:
+                b["reduceOnly"] = "true"
+            return self.x.post("/api/v5/trade/order-algo", b)[0]["algoId"]
+
+        ids = {}
+        try:
+            ids["sl"] = algo({"ordType": "conditional", "sz": _round(real_sz, lot),
+                              "slTriggerPx": _round(sl, tick), "slOrdPx": "-1"})
+            if sz_tp1 >= min_sz:
+                ids["tp1"] = algo({"ordType": "conditional", "sz": _round(sz_tp1, lot),
+                                   "tpTriggerPx": _round(tp1, tick), "tpOrdPx": "-1"})
+            cb = min(max(s["cb_pct"] / 100, 0.001), 0.3)
+            ids["trail"] = algo({"ordType": "move_order_stop", "sz": _round(sz_trail if ids.get("tp1") else real_sz, lot),
+                                 "callbackRatio": f"{cb:.4f}", "activePx": _round(tp1, tick)})
+        except Exception as e:  # noqa: BLE001
+            # bez SL nie zostawiamy pozycji — zamykamy ją od razu
+            self.x.post("/api/v5/trade/close-position", {"instId": inst, "mgnMode": "isolated", **pos_side})
+            raise RuntimeError(f"nie udało się ustawić SL/TP, pozycję zamknięto: {e}") from e
+
+        self.st["_trades"][inst] = {"base": base, "dir": s["dir"], "entry": entry, "sl": sl, "tp1": tp1,
+                                    "sz": real_sz, "ids": ids, "be": False, "opened_ms": int(time.time() * 1000)}
+        return True, (f"{'🟢 LONG' if long_ else '🔴 SHORT'} {base} — OTWARTO AUTOMATYCZNIE (demo)\n"
+                      f"Kontrakt: {inst}\nWejście: {entry}\nSL: {_round(sl, tick)}\n"
+                      f"TP1 (30%): {_round(tp1, tick)}\nTrailing (70%): aktywacja {_round(tp1, tick)}, "
+                      f"callback {cb * 100:.1f}%\nIlość: {real_sz:g} kontraktów | ryzyko ~{round(risk)} USDC")
+
+    # ---------- zarządzanie ----------
+    def manage(self):
+        trades, live = self.st["_trades"], self.positions()
+        pending = {a["algoId"] for a in
+                   self.x.get("/api/v5/trade/orders-algo-pending", ordType="conditional", instType="FUTURES") +
+                   self.x.get("/api/v5/trade/orders-algo-pending", ordType="move_order_stop", instType="FUTURES")}
+        for inst, t in list(trades.items()):
+            pos = live.get(inst)
+            if not pos:                                         # pozycja zamknięta (SL / trailing)
+                for k, aid in t["ids"].items():
+                    if aid in pending:
+                        try:
+                            self.x.post("/api/v5/trade/cancel-algos", [{"algoId": aid, "instId": inst}])
+                        except Exception:  # noqa: BLE001
+                            pass
+                pnl = ""
+                try:
+                    h = self.x.get("/api/v5/account/positions-history", instType="FUTURES", instId=inst, limit="1")
+                    if h:
+                        pnl = f"\nWynik: {float(h[0].get('realizedPnl') or h[0].get('pnl') or 0):+.2f} USDC"
+                except Exception:  # noqa: BLE001
+                    pass
+                self.send(f"🏁 {t['base']} {t['dir'].upper()} zamknięta (demo){pnl}")
+                del trades[inst]
+                continue
+            tp1_done = t["ids"].get("tp1") and t["ids"]["tp1"] not in pending
+            if tp1_done and not t["be"] and t["ids"].get("sl") in pending:
+                try:
+                    self.x.post("/api/v5/trade/amend-algos", {"instId": inst, "algoId": t["ids"]["sl"],
+                                                              "newSlTriggerPx": str(t["entry"]),
+                                                              "newSz": pos["pos"].lstrip("-")})
+                    t["be"] = True
+                    self.send(f"🎯 {t['base']}: TP1 zrealizowany, SL przesunięty na wejście {t['entry']}")
+                except Exception as e:  # noqa: BLE001
+                    self.send(f"⚠️ {t['base']}: TP1 zrealizowany, ale nie udało się przesunąć SL: {e}")

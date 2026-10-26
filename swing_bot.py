@@ -48,6 +48,11 @@ STATE_FILE = os.getenv("STATE_FILE", "state.json")
 OKX_HOSTS = ["https://www.okx.com", "https://my.okx.com", "https://eea.okx.com"]
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
 TG_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
+# Automatyczny handel (tylko konto DEMO). Działa, gdy ustawione są trzy sekrety poniżej.
+OKX_KEY = os.getenv("OKX_API_KEY", "")
+OKX_SECRET = os.getenv("OKX_API_SECRET", "")
+OKX_PASSPHRASE = os.getenv("OKX_API_PASSPHRASE", "")
+MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "2"))   # maks. pozycji otwartych przez bota naraz
 # --------------------------------------------------------------------------
 
 session = requests.Session()
@@ -270,10 +275,36 @@ def save_state(st):
 
 
 # ------------------------------- PRZEBIEG -------------------------------
+def make_trader(st):
+    """Łączy się z kontem demo OKX; None, gdy brak kluczy."""
+    if not (OKX_KEY and OKX_SECRET and OKX_PASSPHRASE):
+        return None
+    from trader import OkxDemo, Trader
+    last = None
+    for host in [os.getenv("OKX_API_HOST", "https://eea.okx.com"), "https://my.okx.com", "https://www.okx.com"]:
+        try:
+            return Trader(OkxDemo(session, host, OKX_KEY, OKX_SECRET, OKX_PASSPHRASE),
+                          st, send_telegram, RISK_PCT, LEVERAGE, MAX_POSITIONS)
+        except Exception as e:  # noqa: BLE001
+            last = e
+    raise RuntimeError(f"Nie udało się połączyć z kontem demo OKX: {last}")
+
+
 def run(dry=False):
     st = load_state()
     now_ms = int(time.time() * 1000)
     sent, errors, cands = 0, [], []
+    trader = None
+    if not dry:
+        try:
+            trader = make_trader(st)
+            if trader:
+                trader.manage()
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"AUTO: {e}")
+            if now_ms - st.get("_auto_err_ms", 0) > 3 * 3600_000:
+                send_telegram(f"⚠️ Bot swing: błąd handlu automatycznego\n{str(e)[:400]}")
+                st["_auto_err_ms"] = now_ms
     for base in PAIRS:
         spot = f"{base}-USDT"
         try:
@@ -298,6 +329,12 @@ def run(dry=False):
     for _, base, s in cands[:MAX_SIGNALS_PER_RUN]:
         inst, ct_val, tick = contract_info(base)
         msg = build_message(base, s, inst, ct_val, tick)
+        if trader:
+            try:
+                ok, info = trader.open_trade(base, s, s["entry"])
+                msg = info if ok else msg + f"\n\n⏭ Nie otwarto automatycznie: {info}"
+            except Exception as e:  # noqa: BLE001
+                msg += f"\n\n⚠️ Błąd przy otwieraniu: {str(e)[:300]}"
         if skipped:
             msg += f"\n\nTen sam sygnał dały też: {', '.join(skipped)} — pominięte (te same ruchy rynku)."
         if dry:
@@ -312,13 +349,15 @@ def run(dry=False):
     if not dry:
         save_state(st)
         # błąd tylko, gdy padło wszystko (np. brak dostępu do API) — maks. raz na 6 h
-        if errors and len(errors) == len(PAIRS) and now_ms - st.get("_err_ms", 0) > 6 * 3600_000:
+        if errors and len([e for e in errors if not e.startswith("AUTO")]) == len(PAIRS) and now_ms - st.get("_err_ms", 0) > 6 * 3600_000:
             send_telegram("⚠️ Bot swing: brak danych z OKX.\n" + errors[0][:300])
             st["_err_ms"] = now_ms
             save_state(st)
     summary = f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC | sygnałów: {sent} | błędów: {len(errors)}"
     if not dry and os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch":
-        send_telegram(f"✅ Bot swing działa (test ręczny)\n{summary}\nPar sprawdzonych: {len(PAIRS) - len(errors)}/{len(PAIRS)}")
+        auto = (f"Handel automatyczny (demo): WŁĄCZONY, pozycji bota: {len(st.get('_trades', {}))}/{MAX_POSITIONS}"
+                if trader else "Handel automatyczny: wyłączony (brak kluczy OKX)")
+        send_telegram(f"✅ Bot swing działa (test ręczny)\n{summary}\n{auto}")
     print(summary)
     for e in errors:
         print("  ", e)

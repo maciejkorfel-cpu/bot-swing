@@ -4,6 +4,11 @@
   "dir": "short",
   "sent_ms": 1793001361949
  },
+ "BCH": {
+  "bar_ts": 1793005200000,
+  "dir": "short",
+  "sent_ms": 1793012373334
+ },
  "BTC": {
   "bar_ts": 1792994400000,
   "dir": "short",

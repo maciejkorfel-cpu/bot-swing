@@ -29,6 +29,10 @@ jobs:
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
+          OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
+          OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
+          MAX_POSITIONS: ${{ vars.MAX_POSITIONS || '2' }}
           CAPITAL: ${{ vars.CAPITAL || '99400' }}
           RISK_PCT: ${{ vars.RISK_PCT || '0.5' }}
           LEVERAGE: ${{ vars.LEVERAGE || '3' }}

@@ -2,7 +2,7 @@ name: Bot swing - sygnaly
 
 on:
   schedule:
-    - cron: "4,19,34,49 * * * *"   # co 15 min (GitHub potrafi opóźnić o kilka minut)
+    - cron: "*/5 * * * *"          # co 5 min: zarządzanie pozycjami i komendy z Telegrama
   workflow_dispatch:               # ręczne uruchomienie z zakładki Actions
 
 permissions:

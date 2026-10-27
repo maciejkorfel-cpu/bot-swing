@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timezone
 
 DEMO_HEADER = {"x-simulated-trading": "1"}       # zawsze konto demo
+MAX_SLIP_R = float(os.getenv("MAX_SLIP_R", "0.2"))  # maks. poślizg wyjścia z SL jako ułamek ryzyka (0,2 = 0,2R)
 
 
 class OkxDemo:
@@ -88,6 +89,23 @@ class Trader:
     def ticker(self, inst_id):
         return self.x.get("/api/v5/market/ticker", instId=inst_id)[0]
 
+    def exit_slip(self, inst_id, long_, sz):
+        """Średni poślizg (w cenie) zamknięcia sz kontraktów zleceniem rynkowym
+        po aktualnym order booku demo. None, gdy książka jest za płytka."""
+        book = self.x.get("/api/v5/market/books", instId=inst_id, sz="400")[0]
+        levels = book["bids"] if long_ else book["asks"]      # long zamyka sprzedażą, short kupnem
+        if not levels:
+            return None
+        best, left, cost = float(levels[0][0]), sz, 0.0
+        for lv in levels:
+            px, q = float(lv[0]), float(lv[1])
+            take = min(left, q)
+            cost += take * px
+            left -= take
+            if left <= 0:
+                return abs(cost / sz - best)
+        return None
+
     # ---------- otwieranie ----------
     def open_trade(self, base, s, spot_price):
         """Zwraca (True, opis) albo (False, powód pominięcia)."""
@@ -123,6 +141,19 @@ class Trader:
             return False, "za mała ilość"
         if sz * ct * px / self.lev > avail * 0.9:
             return False, "za mało wolnego depozytu"
+
+        # Order book demo jest płytki: rynkowy SL na dużą pozycję potrafi wypełnić się
+        # daleko za stopem (26.10 SL ETH 2358 wykonał się po 2421). Zmniejszamy ilość,
+        # aż szacowany poślizg wyjścia będzie <= MAX_SLIP_R ryzyka.
+        cut = False
+        while True:
+            slip = self.exit_slip(inst, long_, sz)
+            if slip is not None and slip <= MAX_SLIP_R * dist:
+                break
+            sz = float(_round(sz * 0.7, lot, "down"))
+            cut = True
+            if sz < min_sz:
+                return False, "za płytki order book demo — wyjście z SL miałoby za duży poślizg"
 
         tp1 = px + sgn * 1.5 * dist
         sz_tp1 = float(_round(sz * 0.3, lot, "down"))
@@ -169,7 +200,8 @@ class Trader:
         return True, (f"{'🟢 LONG' if long_ else '🔴 SHORT'} {base} — OTWARTO AUTOMATYCZNIE (demo)\n"
                       f"Kontrakt: {inst}\nWejście: {entry}\nSL: {_round(sl, tick)}\n"
                       f"TP1 (30%): {_round(tp1, tick)}\nTrailing (70%): aktywacja {_round(tp1, tick)}, "
-                      f"callback {cb * 100:.1f}%\nIlość: {real_sz:g} kontraktów | ryzyko ~{round(risk)} USDC")
+                      f"callback {cb * 100:.1f}%\nIlość: {real_sz:g} kontraktów | ryzyko ~{round(real_sz * ct * dist)} USDC"
+                      + ("\n(ilość zmniejszona — płytki order book demo)" if cut else ""))
 
     # ---------- zarządzanie ----------
     def manage(self):

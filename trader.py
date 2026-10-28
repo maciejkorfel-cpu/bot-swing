@@ -6,11 +6,9 @@ nie jest używane. Klucz API trzeba utworzyć w trybie demo.
 
 Na każdą pozycję bot składa:
   1. zlecenie rynkowe (marża izolowana, dźwignia LEVERAGE),
-  2. SL na całą pozycję (zlecenie warunkowe, tylko redukcja),
-  3. TP1 na 30% pozycji (zlecenie warunkowe, tylko redukcja),
-  4. trailing stop na 70% pozycji (aktywacja = TP1, callback z sygnału).
-Po zrealizowaniu TP1 przesuwa SL na cenę wejścia. Gdy pozycja zniknie,
-anuluje pozostałe zlecenia i wysyła raport.
+  2. SL na całą pozycję (zlecenie warunkowe, tylko redukcja).
+Po każdej zamkniętej świecy 4H swing_bot.py przesuwa SL (trailing 5,5 ATR) przez move_sl().
+Gdy pozycja zniknie, anuluje pozostałe zlecenia i wysyła raport.
 """
 import base64
 import hashlib
@@ -155,9 +153,6 @@ class Trader:
             if sz < min_sz:
                 return False, "za płytki order book demo — wyjście z SL miałoby za duży poślizg"
 
-        tp1 = px + sgn * 1.5 * dist
-        sz_tp1 = float(_round(sz * 0.3, lot, "down"))
-        sz_trail = float(_round(sz - sz_tp1, lot, "down"))
         side, close_side = ("buy", "sell") if long_ else ("sell", "buy")
         pos_side = {"posSide": "long" if long_ else "short"} if self.hedge else {}
 
@@ -172,36 +167,45 @@ class Trader:
         entry = float(pos["avgPx"])
         real_sz = abs(float(pos["pos"]))
         sl = entry - sgn * dist
-        tp1 = entry + sgn * 1.5 * dist
-
-        def algo(body):
-            b = {"instId": inst, "tdMode": "isolated", "side": close_side, **pos_side, **body}
-            if not self.hedge:
-                b["reduceOnly"] = "true"
-            return self.x.post("/api/v5/trade/order-algo", b)[0]["algoId"]
 
         ids = {}
         try:
-            ids["sl"] = algo({"ordType": "conditional", "sz": _round(real_sz, lot),
-                              "slTriggerPx": _round(sl, tick), "slOrdPx": "-1"})
-            if sz_tp1 >= min_sz:
-                ids["tp1"] = algo({"ordType": "conditional", "sz": _round(sz_tp1, lot),
-                                   "tpTriggerPx": _round(tp1, tick), "tpOrdPx": "-1"})
-            cb = min(max(s["cb_pct"] / 100, 0.001), 0.3)
-            ids["trail"] = algo({"ordType": "move_order_stop", "sz": _round(sz_trail if ids.get("tp1") else real_sz, lot),
-                                 "callbackRatio": f"{cb:.4f}", "activePx": _round(tp1, tick)})
+            ids["sl"] = self._algo(inst, close_side, pos_side,
+                                   {"ordType": "conditional", "sz": _round(real_sz, lot),
+                                    "slTriggerPx": _round(sl, tick), "slOrdPx": "-1"})
         except Exception as e:  # noqa: BLE001
             # bez SL nie zostawiamy pozycji — zamykamy ją od razu
             self.x.post("/api/v5/trade/close-position", {"instId": inst, "mgnMode": "isolated", **pos_side})
-            raise RuntimeError(f"nie udało się ustawić SL/TP, pozycję zamknięto: {e}") from e
+            raise RuntimeError(f"nie udało się ustawić SL, pozycję zamknięto: {e}") from e
 
-        self.st["_trades"][inst] = {"base": base, "dir": s["dir"], "entry": entry, "sl": sl, "tp1": tp1,
-                                    "sz": real_sz, "ids": ids, "be": False, "opened_ms": int(time.time() * 1000)}
+        self.st["_trades"][inst] = {"base": base, "dir": s["dir"], "entry": entry, "sl": sl, "sz": real_sz,
+                                    "ids": ids, "be": False, "strategy": "donchian", "tick": tick,
+                                    "trail_bar": s["bar_ts"], "opened_ms": int(time.time() * 1000)}
         return True, (f"{'🟢 LONG' if long_ else '🔴 SHORT'} {base} — OTWARTO AUTOMATYCZNIE (demo)\n"
-                      f"Kontrakt: {inst}\nWejście: {entry}\nSL: {_round(sl, tick)}\n"
-                      f"TP1 (30%): {_round(tp1, tick)}\nTrailing (70%): aktywacja {_round(tp1, tick)}, "
-                      f"callback {cb * 100:.1f}%\nIlość: {real_sz:g} kontraktów | ryzyko ~{round(real_sz * ct * dist)} USDC"
+                      f"Strategia: wybicie kanału 20 świec 4H\nKontrakt: {inst}\nWejście: {entry}\n"
+                      f"SL: {_round(sl, tick)} (trailing 5,5 ATR po każdej świecy 4H, bez TP)\n"
+                      f"Ilość: {real_sz:g} kontraktów | ryzyko ~{round(real_sz * ct * dist)} USDC"
                       + ("\n(ilość zmniejszona — płytki order book demo)" if cut else ""))
+
+    def _algo(self, inst, close_side, pos_side, body):
+        b = {"instId": inst, "tdMode": "isolated", "side": close_side, **pos_side, **body}
+        if not self.hedge:
+            b["reduceOnly"] = "true"
+        return self.x.post("/api/v5/trade/order-algo", b)[0]["algoId"]
+
+    def move_sl(self, inst, t, new_sl):
+        """Przesuwa SL (trailing). Gdy cena jest już za nowym poziomem, zamyka pozycję rynkowo."""
+        long_ = t["dir"] == "long"
+        tick = t.get("tick") or float(self.instrument(t["base"])["tickSz"])
+        tk = self.ticker(inst)
+        last = float(tk.get("last") or 0)
+        pos_side = {"posSide": t["dir"]} if self.hedge else {}
+        if last and ((last <= new_sl) if long_ else (last >= new_sl)):
+            self.x.post("/api/v5/trade/close-position", {"instId": inst, "mgnMode": "isolated", **pos_side})
+            return
+        self.x.post("/api/v5/trade/amend-algos", {"instId": inst, "algoId": t["ids"]["sl"],
+                                                  "newSlTriggerPx": _round(new_sl, tick)})
+        t["sl"] = new_sl
 
     # ---------- zarządzanie ----------
     def manage(self):
@@ -255,7 +259,8 @@ class Trader:
             p = live.get(inst, {})
             u = float(p.get("upl") or 0)
             total_u += u
-            stage = "SL na wejściu" if t.get("be") else "czeka na TP1"
+            stage = (f"SL {t['sl']:.6g} (trailing)" if t.get("strategy") == "donchian"
+                     else "SL na wejściu" if t.get("be") else "czeka na TP1")
             lines.append(f"• {t['base']} {t['dir'].upper()} od {t['entry']} | teraz {p.get('markPx', '?')} | "
                          f"{u:+.2f} USDC | {stage}")
         manual = [p for i, p in live.items() if i not in bot]

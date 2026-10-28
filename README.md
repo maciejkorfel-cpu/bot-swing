@@ -8,29 +8,28 @@ Bez kluczy API OKX bot tylko wysyła sygnały; z kluczami konta demo sam otwiera
 (BTC, ETH, SOL, XRP, HYPE, DOGE, AVAX, LINK, SUI, BCH). Gdy setup spełnia wszystkie
 warunki, wysyła na Telegram gotowe dane do zlecenia. Pozycję otwierasz sam w telefonie.
 
-## Strategia: z trendem, wejście po korekcie
+## Strategia: wybicie kanału Donchiana 4H
 
 | Krok | Warunek |
 |---|---|
-| Trend 4H | LONG: EMA50 > EMA200, cena > EMA200, EMA200 rośnie. SHORT: odwrotnie. Bez trendu nie ma sygnału. |
-| Korekta 1H | W ostatnich 3 świecach cena dotknęła strefy EMA21 (1H) ± 0,5 ATR |
-| Potwierdzenie | Świeca 1H zamknięta w kierunku trendu, po właściwej stronie EMA21, RSI 40–65 (long) lub 35–60 (short) i rośnie lub spada |
-| SL | Za ekstremum z 10 świec 1H + 0,3 ATR, w zakresie 1,5–3 ATR |
-| Wyjście | TP1 = 1,5R zamyka **30%**, SL przesuwasz na wejście. Reszta (70%) jedzie z **trailing stopem** (callback ok. 3 ATR, podany w sygnale). |
-| Wielkość | 0,5% kapitału ryzyka na transakcję, marża izolowana 3x |
-| Filtry | Maks. 1 sygnał na parę na 12 h. Setup ważny 2 h od zamknięcia świecy. |
+| Wejście LONG | Zamknięcie świecy 4H powyżej najwyższego high z 20 poprzednich świec |
+| Wejście SHORT | Zamknięcie świecy 4H poniżej najniższego low z 20 poprzednich świec |
+| SL startowy | 2 x ATR(14) z 4H od wejścia |
+| Trailing | Po każdej zamkniętej świecy 4H SL = zamknięcie -/+ 5,5 x ATR, tylko w stronę zysku. Bez TP. |
+| Wielkość | RISK_PCT (domyślnie 0,5%) kapitału ryzyka na transakcję, marża izolowana 3x |
+| Limit pozycji | brak (MAX_POSITIONS=0); jedna pozycja na parę |
+| Filtr BTC | opcjonalny (BTC_FILTER=1): long tylko gdy BTC > EMA300 4H, short tylko pod |
 
-### Wyniki backtestu (dane OKX, 10 par, ok. 166 dni 1H do 24.10.2026)
+### Wyniki backtestu (dane OKX 4H, X 2023 - X 2026, 9 par z kontraktem demo, prowizje 0,08%/stronę, ryzyko 0,5%)
 
-| Wariant | Transakcje | Śr. wynik / transakcję | 1. połowa | 2. połowa |
-|---|---|---|---|---|
-| Pierwsza wersja (trend EMA21/50, TP 1,5R/3R) | 658 | −0,02R | — | — |
-| **Obecna (trend EMA50/200, TP1 + trailing)** | **589** | **+0,14R** | **+0,14R** | **+0,15R** |
+| Wariant | Transakcje | Trafność | PF | Wynik | Obsunięcie | Ostatnie 14 mies. |
+|---|---|---|---|---|---|---|
+| **Bez filtra BTC (domyślny)** | 883 | 26% | 1,59 | +379R (ok. +447%) | 36% | PF 1,31, +49% |
+| Z filtrem BTC | 749 | 24% | 1,50 | +280R (ok. +242%) | 34% | PF 1,07, +7% |
 
-Opłaty i poślizg są wliczone jako 0,1R na transakcję. Win rate wynosi ok. 46%, a zysk robią rzadkie,
-długie ruchy złapane trailingiem. Spodziewaj się serii 5–8 strat z rzędu.
-Backtest nie uwzględnia tego, że kilka par często daje sygnał jednocześnie w tym samym kierunku
-(BTC, ETH i SOL chodzą razem). **Dlatego najpierw kilka tygodni na demo.**
+Trafność jest niska: zysk robią nieliczne długie ruchy. Serie 10-20 strat z rzędu są normalne.
+Pary chodzą razem, więc bez limitu bywa otwartych naraz do 9 pozycji w tę samą stronę.
+Na mniejszych altach (DOT, LTC, FIL...) strategia dawała wynik ok. zera.
 
 ## Instalacja (ok. 10 minut)
 

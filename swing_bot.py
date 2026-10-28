@@ -1,28 +1,28 @@
 """
-Bot sygnałów SWING dla OKX (demo) -> Telegram.
+Bot SWING dla OKX (konto demo) -> Telegram.
 
-Co 5 min (cron-job.org -> GitHub Actions) sprawdza zamknięte świece 1H/4H,
-a gdy wszystkie warunki są spełnione, wysyła na Telegram gotowy setup:
-kierunek, wejście, SL, TP1, trailing stop i ilość kontraktów. Z kluczami
-API konta demo OKX sam otwiera pozycje (trader.py).
+Co 5 min (cron-job.org -> GitHub Actions) sprawdza, czy zamknęła się nowa świeca 4H.
+Jeśli tak, szuka sygnałów i przesuwa trailing stopy otwartych pozycji.
+Z kluczami API konta demo sam otwiera pozycje (trader.py), bez nich wysyła sygnały.
 
-Strategia (z trendem):
-  1. Trend 4H: EMA50 > EMA200, cena > EMA200 i EMA200 rośnie  -> tylko LONG
-               EMA50 < EMA200, cena < EMA200 i EMA200 spada  -> tylko SHORT
-  2. Korekta 1H: w ostatnich 3 świecach cena dotknęła strefy EMA21(1H) +/- 0,5 ATR
-  3. Potwierdzenie: ostatnia zamknięta świeca 1H zamknęła się po właściwej
-     stronie EMA21, w kierunku trendu, a RSI(14) mieści się w 40-65 (long) / 35-60 (short)
-  4. SL: za lokalnym ekstremum z 10 świec 1H + 0,3 ATR, min. 1,5 ATR, maks. 3 ATR
-  5. TP1 = 1,5R -> zamknij 30%, SL na wejście; reszta jedzie z trailing stopem 3 ATR(1H)
-  6. Wielkość pozycji = RISK_PCT kapitału / odległość do SL
+Strategia: wybicie kanału Donchiana 4H (opcjonalnie z filtrem trendu BTC, BTC_FILTER=1)
+  LONG : zamknięcie 4H > najwyższe high z 20 poprzednich świec
+  SHORT: zamknięcie 4H < najniższe low z 20 poprzednich świec
+  (z filtrem: long tylko gdy BTC > EMA300 4H, short tylko gdy BTC pod nią)
+  SL startowy: 2 x ATR(14) 4H od wejścia
+  Trailing: po każdej zamkniętej świecy 4H SL = zamknięcie -/+ 5,5 x ATR (tylko w stronę zysku)
+  Bez TP: pozycję zamyka SL/trailing. Wielkość = RISK_PCT kapitału / odległość do SL.
 
-Backtest (10 par, ~166 dni 1H do 24.10.2026, opłaty 0,1R/transakcję):
-  589 transakcji, śr. +0,14R; obie połowy okresu na plusie (+0,14R i +0,15R).
+Backtest (9 par z kontraktem demo, 4H, X 2023 - X 2026, prowizje 0,08%/stronę, ryzyko 0,5%, bez limitu pozycji):
+  bez filtra BTC: 883 transakcje, trafność 26%, PF 1,59, +379R, ok. +447%, obsunięcie 36%
+                  ostatnie 14 mies.: PF 1,31, +49%
+  z filtrem BTC:  749 transakcji, PF 1,50, +280R, ok. +242%, obsunięcie 34%; ostatnie 14 mies.: PF 1,07
+  Jednocześnie otwartych bywało do 9 pozycji.
 
 Uruchomienie:
   python swing_bot.py              -> jeden przebieg (GitHub Actions)
-  python swing_bot.py --dry        -> bez Telegrama, wynik w konsoli
-  python swing_bot.py --backtest   -> prosty backtest strategii na historii 1H/4H
+  python swing_bot.py --dry        -> bez Telegrama i zleceń, wynik w konsoli
+  python swing_bot.py --backtest   -> backtest strategii na historii 4H
 """
 import json
 import os
@@ -35,16 +35,15 @@ import requests
 
 # ------------------------------- USTAWIENIA -------------------------------
 PAIRS = ["BTC", "ETH", "SOL", "XRP", "HYPE", "DOGE", "AVAX", "LINK", "SUI", "BCH"]
-CAPITAL = float(os.getenv("CAPITAL", "99400"))        # kapitał demo w USDC
+CAPITAL = float(os.getenv("CAPITAL", "99400"))        # kapitał demo w USDC (do sygnałów bez kluczy)
 RISK_PCT = float(os.getenv("RISK_PCT", "0.5"))        # ryzyko na transakcję w %
-LEVERAGE = int(os.getenv("LEVERAGE", "3"))            # sugerowana dźwignia (izolowana)
-COOLDOWN_H = 12                                        # min. przerwa między sygnałami na tej samej parze
-SIGNAL_VALID_H = 2                                     # jak długo setup jest aktualny
-MAX_SIGNALS_PER_RUN = int(os.getenv("MAX_SIGNALS_PER_RUN", "0")) or 99    # 0 = bez limitu sygnałów na przebieg
-TREND_FAST, TREND_SLOW = 50, 200                      # EMA na 4H
-TP1_R, TP1_PART = 1.5, 0.3                             # TP1 przy 1,5R zamyka 30% pozycji
-TRAIL_ATR = 3.0                                        # trailing stop reszty = 3 x ATR(1H)
-SL_MIN_ATR, SL_MAX_ATR, SL_BUFFER_ATR = 1.5, 3.0, 0.3
+LEVERAGE = int(os.getenv("LEVERAGE", "3"))            # dźwignia (marża izolowana)
+DON_N = 20                                             # kanał Donchiana: liczba świec 4H
+STOP_ATR = 2.0                                         # SL startowy = 2 x ATR(14) 4H
+TRAIL_ATR = 5.5                                        # trailing = 5,5 x ATR(14) 4H od zamknięcia
+BTC_FILTER = int(os.getenv("BTC_FILTER", "0"))         # 1 = long tylko gdy BTC > EMA300 4H, short gdy pod
+BTC_EMA = 300
+H4 = 4 * 3600_000
 STATE_FILE = os.getenv("STATE_FILE", "state.json")
 OKX_HOSTS = ["https://www.okx.com", "https://my.okx.com", "https://eea.okx.com"]
 TG_TOKEN = os.getenv("TELEGRAM_TOKEN", "")
@@ -54,7 +53,6 @@ OKX_KEY = os.getenv("OKX_API_KEY", "")
 OKX_SECRET = os.getenv("OKX_API_SECRET", "")
 OKX_PASSPHRASE = os.getenv("OKX_API_PASSPHRASE", "")
 MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "0"))   # maks. pozycji bota naraz; 0 = bez limitu
-# --------------------------------------------------------------------------
 
 session = requests.Session()
 session.headers.update({"User-Agent": "swing-signal-bot/1.0"})
@@ -158,58 +156,39 @@ def atr(k, p=14):
     return out
 
 
+
 # ------------------------------- STRATEGIA -------------------------------
-def trend_4h(k4, idx=None):
-    """'long' / 'short' / None na podstawie zamkniętej świecy 4H o indeksie idx."""
-    idx = len(k4) - 1 if idx is None else idx
-    if idx < TREND_SLOW + 10:
-        return None
-    c = [x[4] for x in k4[: idx + 1]]
-    f, s = ema(c, TREND_FAST), ema(c, TREND_SLOW)
-    slope = s[-1] - s[-6]
-    trend_4h.strength = abs(slope) / s[-1]                 # siła trendu (do wyboru najlepszych par)
-    if f[-1] > s[-1] and c[-1] > s[-1] and slope > 0:
-        return "long"
-    if f[-1] < s[-1] and c[-1] < s[-1] and slope < 0:
-        return "short"
-    return None
+def btc_regime(k_btc):
+    """1 = BTC nad EMA300 (4H), -1 = pod, 0 = filtr wyłączony."""
+    if not BTC_FILTER:
+        return 0
+    c = [x[4] for x in k_btc]
+    return 1 if c[-1] > ema(c, BTC_EMA)[-1] else -1
 
 
-def setup_1h(k1, direction):
-    """Sprawdza setup na ostatniej zamkniętej świecy 1H. Zwraca dict albo None."""
-    if direction is None or len(k1) < 60:
+def donchian_signal(k4, regime):
+    """Sygnał na ostatniej zamkniętej świecy 4H. Zwraca dict albo None."""
+    if len(k4) < DON_N + 20:
         return None
-    c = [x[4] for x in k1]
-    e21, r, a = ema(c, 21), rsi(c), atr(k1)
-    last, A = k1[-1], a[-1]
-    zone = 0.5 * A
-    recent = k1[-3:]
-    if direction == "long":
-        touched = any(x[3] <= e21[-1 - (2 - i)] + zone for i, x in enumerate(recent))
-        confirm = last[4] > e21[-1] and last[4] > last[1] and 40 <= r[-1] <= 65 and r[-1] > r[-2]
-        if not (touched and confirm):
-            return None
-        entry = last[4]
-        swing = min(x[3] for x in k1[-10:])
-        dist = entry - swing + SL_BUFFER_ATR * A
+    last, prev = k4[-1], k4[-1 - DON_N:-1]
+    hi, lo = max(x[2] for x in prev), min(x[3] for x in prev)
+    A = atr(k4)[-1]
+    if last[4] > hi and regime >= 0:
+        d = "long"
+    elif last[4] < lo and regime <= 0:
+        d = "short"
     else:
-        touched = any(x[2] >= e21[-1 - (2 - i)] - zone for i, x in enumerate(recent))
-        confirm = last[4] < e21[-1] and last[4] < last[1] and 35 <= r[-1] <= 60 and r[-1] < r[-2]
-        if not (touched and confirm):
-            return None
-        entry = last[4]
-        swing = max(x[2] for x in k1[-10:])
-        dist = swing - entry + SL_BUFFER_ATR * A
-    dist = max(dist, SL_MIN_ATR * A)
-    if dist > SL_MAX_ATR * A:
-        return None                      # stop za daleko -> słaby R:R, pomijamy
-    s = 1 if direction == "long" else -1
-    return {
-        "dir": direction, "entry": entry, "sl": entry - s * dist,
-        "tp1": entry + s * TP1_R * dist,
-        "trail": TRAIL_ATR * A, "cb_pct": TRAIL_ATR * A / entry * 100,
-        "dist": dist, "atr": A, "rsi": r[-1], "ema21": e21[-1], "bar_ts": last[0],
-    }
+        return None
+    s = 1 if d == "long" else -1
+    entry = last[4]
+    return {"dir": d, "entry": entry, "sl": entry - s * STOP_ATR * A, "dist": STOP_ATR * A,
+            "atr": A, "level": hi if d == "long" else lo, "bar_ts": last[0]}
+
+
+def trail_level(k4, direction):
+    """Nowy poziom trailing stopu po zamkniętej świecy 4H."""
+    A, c = atr(k4)[-1], k4[-1][4]
+    return c - TRAIL_ATR * A if direction == "long" else c + TRAIL_ATR * A
 
 
 # ------------------------------- WYJŚCIE -------------------------------
@@ -227,30 +206,23 @@ def build_message(base, s, inst, ct_val, tick):
     qty_coin = risk_usd / s["dist"]
     notional = qty_coin * s["entry"]
     contracts = int(qty_coin / ct_val) if ct_val else None
-    valid_to = datetime.fromtimestamp(s["bar_ts"] / 1000, tz=timezone.utc) + timedelta(hours=1 + SIGNAL_VALID_H)
-    valid_pl = valid_to.astimezone(ZoneInfo("Europe/Warsaw")).strftime("%d.%m %H:%M")
     arrow = "🟢 LONG" if s["dir"] == "long" else "🔴 SHORT"
-    button = "Kup (długie)" if s["dir"] == "long" else "Sprzedaj (krótkie)"
     lines = [
-        f"{arrow} {base} — sygnał SWING",
+        f"{arrow} {base} — wybicie kanału 20 świec 4H",
         f"Kontrakt: {inst or base + ' X-Perp'}",
         "",
-        f"Wejście:  {fmt(s['entry'], tick)}  (limit lub rynek)",
-        f"SL:       {fmt(s['sl'], tick)}",
-        f"TP1:      {fmt(s['tp1'], tick)}  (1,5R — zamknij 30%, SL przesuń na wejście)",
-        f"Trailing: reszta (70%) — aktywacja {fmt(s['tp1'], tick)}, callback {s['cb_pct']:.1f}%",
-        "          (bez górnego TP — trailing zamknie pozycję)",
+        f"Wejście:  {fmt(s['entry'], tick)}  (rynek)",
+        f"SL:       {fmt(s['sl'], tick)}  (2 x ATR 4H)",
+        f"Trailing: po każdej świecy 4H przesuń SL na zamknięcie {'-' if s['dir'] == 'long' else '+'} 5,5 x ATR "
+        f"(teraz ok. {fmt(TRAIL_ATR * s['atr'])}), bez TP",
         "",
         f"Ilość:    {contracts:,} kontraktów".replace(",", " ") if contracts else f"Ilość: {qty_coin:.4f} {base}",
         f"Wartość:  ~{notional:,.0f} USD | marża izolowana {LEVERAGE}x ≈ {notional / LEVERAGE:,.0f} USDC".replace(",", " "),
         f"Ryzyko:   ~{risk_usd:,.0f} USDC ({RISK_PCT}% kapitału)".replace(",", " "),
-        "",
-        f"Trend 4H (EMA50/200): {'wzrostowy' if s['dir'] == 'long' else 'spadkowy'} | RSI 1H {s['rsi']:.0f} | ATR 1H {fmt(s['atr'])}",
-        f"Ważny do: {valid_pl} — potem nie wchodź",
-        f"Przycisk: {button}, zaznacz TP/SL (TP1 na 30% ilości), potem dodaj Trailing stop",
     ]
+    if BTC_FILTER:
+        lines.append(f"Filtr BTC: {'nad' if s['dir'] == 'long' else 'pod'} EMA300 4H")
     return "\n".join(lines)
-
 
 def send_telegram(text):
     if not (TG_TOKEN and TG_CHAT):
@@ -313,10 +285,30 @@ def make_trader(st):
     raise RuntimeError(f"Nie udało się połączyć z kontem demo OKX: {last}")
 
 
+
+# ------------------------------- PRZEBIEG -------------------------------
+def update_trailing(st, trader, k4_by_base, errors):
+    """Po zamknięciu świecy 4H przesuwa SL pozycji bota (tylko w stronę zysku)."""
+    for inst, t in list(st.get("_trades", {}).items()):
+        if t.get("strategy") != "donchian":
+            continue
+        k4 = k4_by_base.get(t["base"])
+        if not k4 or k4[-1][0] <= t.get("trail_bar", 0):
+            continue
+        try:
+            new = trail_level(k4, t["dir"])
+            better = new > t["sl"] if t["dir"] == "long" else new < t["sl"]
+            if better:
+                trader.move_sl(inst, t, new)
+            t["trail_bar"] = k4[-1][0]
+        except Exception as e:  # noqa: BLE001
+            errors.append(f"AUTO: trailing {t['base']}: {e}")
+
+
 def run(dry=False):
     st = load_state()
     now_ms = int(time.time() * 1000)
-    sent, errors, cands = 0, [], []
+    sent, errors = 0, []
     trader = None
     if not dry:
         try:
@@ -332,53 +324,57 @@ def run(dry=False):
             check_commands(st, trader)
         except Exception as e:  # noqa: BLE001
             errors.append(f"AUTO: Telegram: {e}")
-    # skan przy każdym uruchomieniu: duplikaty blokuje bar_ts w state.json,
-    # a nieaktualne świece odrzuca warunek świeżości poniżej
-    for base in PAIRS:
-        spot = f"{base}-USDT"
+
+    # sygnały i trailing liczymy raz na każdą zamkniętą świecę 4H
+    expected = now_ms // H4 * H4 - H4                     # początek ostatniej zamkniętej świecy 4H
+    if dry or st.get("_last_4h") != expected:
         try:
-            k4 = candles(spot, "4H", 320)
-            k1 = candles(spot, "1H", 200)
-            # świeca 1H musi być świeża (zamknięta < 75 min temu), inaczej nie wysyłamy
-            if not k1 or now_ms - (k1[-1][0] + 3600_000) > 75 * 60_000:
-                continue
-            s = setup_1h(k1, trend_4h(k4))
-            if not s:
-                continue
-            prev = st.get(base, {})
-            if prev.get("bar_ts") == s["bar_ts"]:
-                continue                                   # ten sam sygnał już rozpatrzony
-            if now_ms - prev.get("sent_ms", 0) < COOLDOWN_H * 3600_000:
-                continue
-            cands.append((trend_4h.strength, base, s))
+            k_btc = candles("BTC-USDT", "4H", 1000)
+            regime = btc_regime(k_btc)
         except Exception as e:  # noqa: BLE001
-            errors.append(f"{base}: {e}")
-    cands.sort(key=lambda x: x[0], reverse=True)            # najsilniejszy trend 4H pierwszy
-    skipped = [b for _, b, _ in cands[MAX_SIGNALS_PER_RUN:]]
-    for _, base, s in cands[:MAX_SIGNALS_PER_RUN]:
-        inst, ct_val, tick = contract_info(base)
-        msg = build_message(base, s, inst, ct_val, tick)
-        if trader:
+            k_btc, regime = None, None
+            errors.append(f"BTC: {e}")
+        k4_by_base, complete = {}, regime is not None and k_btc[-1][0] == expected
+        for base in (PAIRS if regime is not None else []):
             try:
-                ok, info = trader.open_trade(base, s, s["entry"])
-                msg = info if ok else msg + f"\n\n⏭ Nie otwarto automatycznie: {info}"
+                k4 = k_btc if base == "BTC" else candles(f"{base}-USDT", "4H", 150)
+                if not k4 or k4[-1][0] != expected:
+                    complete = False                       # OKX jeszcze nie opublikował świecy
+                    continue
+                k4_by_base[base] = k4
+                s = donchian_signal(k4, regime)
+                if not s or st.get(base, {}).get("bar_ts") == s["bar_ts"]:
+                    continue
+                if any(t["base"] == base for t in st.get("_trades", {}).values()):
+                    continue                               # pozycja na tej parze już trwa (jak w backteście)
+                inst, ct_val, tick = contract_info(base)
+                msg = build_message(base, s, inst, ct_val, tick)
+                if trader:
+                    try:
+                        ok, info = trader.open_trade(base, s, s["entry"])
+                        msg = info if ok else msg + f"\n\n⏭ Nie otwarto automatycznie: {info}"
+                    except Exception as e:  # noqa: BLE001
+                        msg += f"\n\n⚠️ Błąd przy otwieraniu: {str(e)[:300]}"
+                if dry:
+                    print(msg + "\n" + "-" * 40)
+                else:
+                    send_telegram(msg)
+                    st[base] = {"bar_ts": s["bar_ts"], "sent_ms": now_ms, "dir": s["dir"]}
+                sent += 1
             except Exception as e:  # noqa: BLE001
-                msg += f"\n\n⚠️ Błąd przy otwieraniu: {str(e)[:300]}"
-        if skipped:
-            msg += f"\n\nTen sam sygnał dały też: {', '.join(skipped)} — pominięte (te same ruchy rynku)."
+                errors.append(f"{base}: {e}")
+                complete = False
+        if trader:
+            update_trailing(st, trader, k4_by_base, errors)
+        if complete and not dry:
+            st["_last_4h"] = expected
         if dry:
-            print(msg + "\n" + "-" * 40)
-        else:
-            send_telegram(msg)
-            st[base] = {"bar_ts": s["bar_ts"], "sent_ms": now_ms, "dir": s["dir"]}
-        sent += 1
-    for _, base, s in cands[MAX_SIGNALS_PER_RUN:]:
-        if not dry:                                        # pominięte nie wrócą przy tej samej świecy
-            st[base] = {"bar_ts": s["bar_ts"], "sent_ms": st.get(base, {}).get("sent_ms", 0), "dir": s["dir"]}
+            print(f"BTC vs EMA300: {'nad' if regime == 1 else 'pod' if regime == -1 else 'filtr wyłączony'}")
+
     if not dry:
         save_state(st)
         # błąd tylko, gdy padło wszystko (np. brak dostępu do API) — maks. raz na 6 h
-        if errors and len([e for e in errors if not e.startswith("AUTO")]) == len(PAIRS) and now_ms - st.get("_err_ms", 0) > 6 * 3600_000:
+        if errors and len([e for e in errors if not e.startswith("AUTO")]) >= len(PAIRS) and now_ms - st.get("_err_ms", 0) > 6 * 3600_000:
             send_telegram("⚠️ Bot swing: brak danych z OKX.\n" + errors[0][:300])
             st["_err_ms"] = now_ms
             save_state(st)
@@ -386,69 +382,56 @@ def run(dry=False):
     if not dry and os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" and not os.getenv("QUIET"):
         auto = (f"Handel automatyczny (demo): WŁĄCZONY, pozycji bota: {len(st.get('_trades', {}))}/{MAX_POSITIONS or 'bez limitu'}"
                 if trader else "Handel automatyczny: wyłączony (brak kluczy OKX)")
-        send_telegram(f"✅ Bot swing działa (test ręczny)\n{summary}\n{auto}")
+        send_telegram(f"✅ Bot swing działa (test ręczny)\nStrategia: Donchian 4H{' + filtr BTC' if BTC_FILTER else ''}\n{summary}\n{auto}")
     print(summary)
     for e in errors:
         print("  ", e)
 
 
 # ------------------------------- BACKTEST -------------------------------
-def backtest(bars_1h=2000):
-    """Backtest: wejście na zamknięciu świecy sygnałowej, 30% na TP1 (SL -> BE), reszta trailing 3 ATR."""
-    total_r, trades, wins = 0.0, 0, 0
+def backtest(bars=3000, fee=0.0008):
+    """Backtest Donchian 4H: wejście na otwarciu następnej świecy, SL 2 ATR, trailing 5,5 ATR, bez limitu pozycji."""
+    k_btc = candles("BTC-USDT", "4H", bars)
+    bc = [x[4] for x in k_btc]
+    be = ema(bc, BTC_EMA)
+    reg = {x[0]: (1 if bc[i] > be[i] else -1) for i, x in enumerate(k_btc)}
+    total, n_all, wins = 0.0, 0, 0
     for base in PAIRS:
-        spot = f"{base}-USDT"
         try:
-            k1 = candles(spot, "1H", bars_1h)
-            k4 = candles(spot, "4H", bars_1h // 4 + 260)
+            k = k_btc if base == "BTC" else candles(f"{base}-USDT", "4H", bars)
         except Exception as e:  # noqa: BLE001
             print(base, "błąd:", e)
             continue
-        pair_r, n, i, cool_until = 0.0, 0, 120, 0
-        j4 = 0
-        while i < len(k1) - 1:
-            ts = k1[i][0]
-            while j4 + 1 < len(k4) and k4[j4 + 1][0] + 4 * 3600_000 <= ts + 3600_000:
-                j4 += 1
-            if ts < cool_until:
-                i += 1
-                continue
-            s = setup_1h(k1[i - 119: i + 1], trend_4h(k4, j4))
-            if not s:
-                i += 1
-                continue
-            long_ = s["dir"] == "long"
-            r, half, j = 0.0, False, i + 1
-            sl, a1 = s["sl"], atr(k1)
-            rest = 1 - TP1_PART
-            while j < len(k1):
-                h, l, c = k1[j][2], k1[j][3], k1[j][4]
-                if (l <= sl) if long_ else (h >= sl):       # konserwatywnie: SL przed TP w tej samej świecy
-                    move = (sl - s["entry"]) if long_ else (s["entry"] - sl)
-                    r += (rest if half else 1.0) * move / s["dist"]
-                    break
-                if not half and ((h >= s["tp1"]) if long_ else (l <= s["tp1"])):
-                    r += TP1_PART * TP1_R
-                    half, sl = True, s["entry"]
-                if half:                                    # trailing liczony od zamknięcia świecy
-                    sl = max(sl, c - TRAIL_ATR * a1[j]) if long_ else min(sl, c + TRAIL_ATR * a1[j])
-                j += 1
-            else:
-                last = k1[-1][4]
-                r += (rest if half else 1.0) * ((last - s["entry"]) if long_ else (s["entry"] - last)) / s["dist"]
-            r -= 0.1                                        # opłaty + poślizg ≈ 0,1R
-            pair_r += r
-            n += 1
-            wins += r > 0
-            cool_until = k1[min(j, len(k1) - 1)][0] + COOLDOWN_H * 3600_000
-            i = j + 1
-        trades += n
-        total_r += pair_r
-        print(f"{base:5} transakcji: {n:3}  wynik: {pair_r:+6.1f} R")
-    if trades:
-        print(f"\nRAZEM: {trades} transakcji | win rate {wins / trades:.0%} | "
-              f"wynik {total_r:+.1f} R | śr. {total_r / trades:+.2f} R/transakcję "
-              f"| przy ryzyku {RISK_PCT}% ≈ {total_r * RISK_PCT:+.1f}% kapitału")
+        a, pos, res = atr(k), None, []
+        for i in range(DON_N + BTC_EMA // 4, len(k) - 1):
+            o, h, l, c = k[i][1:5]
+            if pos:
+                s = pos["s"]
+                hit = (l <= s) if pos["d"] == 1 else (h >= s)
+                if hit:
+                    px = min(o, s) if pos["d"] == 1 else max(o, s)
+                    res.append((pos["d"] * (px - pos["e"]) - fee * (pos["e"] + px)) / pos["r"])
+                    pos = None
+                else:
+                    t = c - pos["d"] * TRAIL_ATR * a[i]
+                    pos["s"] = max(s, t) if pos["d"] == 1 else min(s, t)
+            if not pos:
+                r = reg.get(k[i][0], 0) if BTC_FILTER else 0
+                prev = k[i - DON_N:i]
+                d = 1 if (c > max(x[2] for x in prev) and r >= 0) else -1 if (c < min(x[3] for x in prev) and r <= 0) else 0
+                if d:
+                    e = k[i + 1][1]
+                    pos = {"d": d, "e": e, "s": e - d * STOP_ATR * a[i], "r": STOP_ATR * a[i]}
+        if pos:
+            px = k[-1][4]
+            res.append((pos["d"] * (px - pos["e"]) - fee * (pos["e"] + px)) / pos["r"])
+        total += sum(res)
+        n_all += len(res)
+        wins += sum(1 for x in res if x > 0)
+        print(f"{base:5} transakcji: {len(res):3}  wynik: {sum(res):+6.1f} R")
+    if n_all:
+        print(f"\nRAZEM: {n_all} transakcji | trafność {wins / n_all:.0%} | wynik {total:+.1f} R "
+              f"| śr. {total / n_all:+.2f} R | przy ryzyku {RISK_PCT}% ≈ {total * RISK_PCT:+.1f}% kapitału (bez procentu składanego)")
 
 
 if __name__ == "__main__":

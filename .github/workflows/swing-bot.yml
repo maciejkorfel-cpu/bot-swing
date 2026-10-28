@@ -44,6 +44,7 @@ jobs:
           OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
           OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
           MAX_POSITIONS: '0'              # 0 = bez limitu pozycji
+          BTC_FILTER: '0'                 # 1 = filtr trendu BTC (EMA300 4H)
           CAPITAL: ${{ vars.CAPITAL || '99400' }}
           RISK_PCT: ${{ vars.RISK_PCT || '0.5' }}
           LEVERAGE: ${{ vars.LEVERAGE || '3' }}

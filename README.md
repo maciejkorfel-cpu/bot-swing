@@ -1,6 +1,10 @@
 # Bot swing: sygnały OKX na Telegram
 
-Bot **nie handluje** i nie potrzebuje kluczy API OKX. Co 15 minut skanuje 10 par
+> **Zegar:** cron GitHuba bywa uruchamiany tylko co kilka godzin, dlatego bota co 5 min
+> uruchamia darmowy [cron-job.org](https://cron-job.org) (zapytanie POST do GitHub API,
+> `workflow_dispatch` z `cicho=true`). Cron GitHuba co 15 min zostaje jako zapas.
+
+Bez kluczy API OKX bot tylko wysyła sygnały; z kluczami konta demo sam otwiera pozycje. Co 5 minut skanuje 10 par
 (BTC, ETH, SOL, XRP, HYPE, DOGE, AVAX, LINK, SUI, BCH). Gdy setup spełnia wszystkie
 warunki, wysyła na Telegram gotowe dane do zlecenia. Pozycję otwierasz sam w telefonie.
 

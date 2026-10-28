@@ -1,9 +1,10 @@
 """
 Bot sygnałów SWING dla OKX (demo) -> Telegram.
 
-Bot NIE składa zleceń. Co 15 min sprawdza zamknięte świece 1H/4H,
+Co 5 min (cron-job.org -> GitHub Actions) sprawdza zamknięte świece 1H/4H,
 a gdy wszystkie warunki są spełnione, wysyła na Telegram gotowy setup:
-kierunek, wejście, SL, TP1, trailing stop i ilość kontraktów.
+kierunek, wejście, SL, TP1, trailing stop i ilość kontraktów. Z kluczami
+API konta demo OKX sam otwiera pozycje (trader.py).
 
 Strategia (z trendem):
   1. Trend 4H: EMA50 > EMA200, cena > EMA200 i EMA200 rośnie  -> tylko LONG
@@ -331,9 +332,9 @@ def run(dry=False):
             check_commands(st, trader)
         except Exception as e:  # noqa: BLE001
             errors.append(f"AUTO: Telegram: {e}")
-    # nowe sygnały szukamy tylko przez 20 min po zamknięciu świecy 1H (oszczędza zapytania)
-    scan = dry or os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" or datetime.now(timezone.utc).minute < 20
-    for base in (PAIRS if scan else []):
+    # skan przy każdym uruchomieniu: duplikaty blokuje bar_ts w state.json,
+    # a nieaktualne świece odrzuca warunek świeżości poniżej
+    for base in PAIRS:
         spot = f"{base}-USDT"
         try:
             k4 = candles(spot, "4H", 320)
@@ -382,7 +383,7 @@ def run(dry=False):
             st["_err_ms"] = now_ms
             save_state(st)
     summary = f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC | sygnałów: {sent} | błędów: {len(errors)}"
-    if not dry and os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch":
+    if not dry and os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" and not os.getenv("QUIET"):
         auto = (f"Handel automatyczny (demo): WŁĄCZONY, pozycji bota: {len(st.get('_trades', {}))}/{MAX_POSITIONS}"
                 if trader else "Handel automatyczny: wyłączony (brak kluczy OKX)")
         send_telegram(f"✅ Bot swing działa (test ręczny)\n{summary}\n{auto}")

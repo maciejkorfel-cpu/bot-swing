@@ -44,7 +44,7 @@
   "dir": "long",
   "sent_ms": 1793172989589
  },
- "_last_4h": 1793145600000,
+ "_last_4h": 1793160000000,
  "_tg_offset": 22371613,
  "_trades": {
   "DOGE-USD_UM_XPERP-310516": {
@@ -60,7 +60,7 @@
    "strategy": "donchian",
    "sz": 22826.0,
    "tick": 1e-05,
-   "trail_bar": 1793145600000
+   "trail_bar": 1793160000000
   }
  }
 }

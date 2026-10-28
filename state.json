@@ -44,23 +44,15 @@
   "dir": "long",
   "sent_ms": 1793172989589
  },
+ "_history": [
+  {
+   "base": "DOGE",
+   "closed_ms": 1793178325005,
+   "dir": "long",
+   "pnl": 37.19479983993457
+  }
+ ],
  "_last_4h": 1793160000000,
  "_tg_offset": 22371613,
- "_trades": {
-  "DOGE-USD_UM_XPERP-310516": {
-   "base": "DOGE",
-   "be": false,
-   "dir": "long",
-   "entry": 0.0797491851397532,
-   "ids": {
-    "sl": "4049033459842691073"
-   },
-   "opened_ms": 1793173000655,
-   "sl": 0.07761555289069239,
-   "strategy": "donchian",
-   "sz": 22826.0,
-   "tick": 1e-05,
-   "trail_bar": 1793160000000
-  }
- }
+ "_trades": {}
 }

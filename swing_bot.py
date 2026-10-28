@@ -40,7 +40,7 @@ RISK_PCT = float(os.getenv("RISK_PCT", "0.5"))        # ryzyko na transakcję w 
 LEVERAGE = int(os.getenv("LEVERAGE", "3"))            # sugerowana dźwignia (izolowana)
 COOLDOWN_H = 12                                        # min. przerwa między sygnałami na tej samej parze
 SIGNAL_VALID_H = 2                                     # jak długo setup jest aktualny
-MAX_SIGNALS_PER_RUN = 2                                # pary są skorelowane -> maks. 2 sygnały naraz
+MAX_SIGNALS_PER_RUN = int(os.getenv("MAX_SIGNALS_PER_RUN", "0")) or 99    # 0 = bez limitu sygnałów na przebieg
 TREND_FAST, TREND_SLOW = 50, 200                      # EMA na 4H
 TP1_R, TP1_PART = 1.5, 0.3                             # TP1 przy 1,5R zamyka 30% pozycji
 TRAIL_ATR = 3.0                                        # trailing stop reszty = 3 x ATR(1H)
@@ -53,7 +53,7 @@ TG_CHAT = os.getenv("TELEGRAM_CHAT_ID", "")
 OKX_KEY = os.getenv("OKX_API_KEY", "")
 OKX_SECRET = os.getenv("OKX_API_SECRET", "")
 OKX_PASSPHRASE = os.getenv("OKX_API_PASSPHRASE", "")
-MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "2"))   # maks. pozycji otwartych przez bota naraz
+MAX_POSITIONS = int(os.getenv("MAX_POSITIONS", "0"))   # maks. pozycji bota naraz; 0 = bez limitu
 # --------------------------------------------------------------------------
 
 session = requests.Session()
@@ -384,7 +384,7 @@ def run(dry=False):
             save_state(st)
     summary = f"{datetime.now(timezone.utc):%Y-%m-%d %H:%M} UTC | sygnałów: {sent} | błędów: {len(errors)}"
     if not dry and os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" and not os.getenv("QUIET"):
-        auto = (f"Handel automatyczny (demo): WŁĄCZONY, pozycji bota: {len(st.get('_trades', {}))}/{MAX_POSITIONS}"
+        auto = (f"Handel automatyczny (demo): WŁĄCZONY, pozycji bota: {len(st.get('_trades', {}))}/{MAX_POSITIONS or 'bez limitu'}"
                 if trader else "Handel automatyczny: wyłączony (brak kluczy OKX)")
         send_telegram(f"✅ Bot swing działa (test ręczny)\n{summary}\n{auto}")
     print(summary)

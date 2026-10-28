@@ -110,7 +110,7 @@ class Trader:
     def open_trade(self, base, s, spot_price):
         """Zwraca (True, opis) albo (False, powód pominięcia)."""
         trades = self.st["_trades"]
-        if len(trades) >= self.max_pos:
+        if self.max_pos and len(trades) >= self.max_pos:
             return False, f"limit {self.max_pos} pozycji"
         ins = self.instrument(base)
         if not ins:
@@ -249,7 +249,7 @@ class Trader:
         live = self.positions()
         lines = ["📊 PODSUMOWANIE (konto demo)", f"Kapitał: {eq:,.2f} USDC | wolne: {avail:,.2f} USDC".replace(",", " "), ""]
         bot = self.st["_trades"]
-        lines.append(f"Pozycje bota: {len(bot)}/{self.max_pos}")
+        lines.append(f"Pozycje bota: {len(bot)}/{self.max_pos or 'bez limitu'}")
         total_u = 0.0
         for inst, t in bot.items():
             p = live.get(inst, {})

@@ -62,25 +62,15 @@
    "closed_ms": 1793189431539,
    "dir": "long",
    "pnl": -84.846191505
+  },
+  {
+   "base": "HYPE",
+   "closed_ms": 1793317826796,
+   "dir": "long",
+   "pnl": -565.70996988
   }
  ],
  "_last_4h": 1793289600000,
  "_tg_offset": 22371617,
- "_trades": {
-  "HYPE-USD_UM_XPERP-310801": {
-   "base": "HYPE",
-   "be": false,
-   "dir": "long",
-   "entry": 93.99292268565615,
-   "ids": {
-    "sl": "4052948365985984513"
-   },
-   "opened_ms": 1793289673965,
-   "sl": 89.0443523784308,
-   "strategy": "donchian",
-   "sz": 983.0,
-   "tick": 0.0001,
-   "trail_bar": 1793289600000
-  }
- }
+ "_trades": {}
 }

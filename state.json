@@ -1,28 +1,28 @@
 {
  "AVAX": {
-  "bar_ts": 1793232000000,
+  "bar_ts": 1793304000000,
   "dir": "short",
-  "sent_ms": 1793246461022
+  "sent_ms": 1793318462013
  },
  "BCH": {
-  "bar_ts": 1793005200000,
+  "bar_ts": 1793304000000,
   "dir": "short",
-  "sent_ms": 1793012373334
+  "sent_ms": 1793318462013
  },
  "BTC": {
-  "bar_ts": 1793174400000,
-  "dir": "long",
-  "sent_ms": 1793188865949
+  "bar_ts": 1793304000000,
+  "dir": "short",
+  "sent_ms": 1793318462013
  },
  "DOGE": {
-  "bar_ts": 1793145600000,
-  "dir": "long",
-  "sent_ms": 1793172989589
+  "bar_ts": 1793304000000,
+  "dir": "short",
+  "sent_ms": 1793318462013
  },
  "ETH": {
-  "bar_ts": 1792994400000,
+  "bar_ts": 1793304000000,
   "dir": "short",
-  "sent_ms": 1793001361949
+  "sent_ms": 1793318462013
  },
  "HYPE": {
   "bar_ts": 1793275200000,
@@ -30,24 +30,24 @@
   "sent_ms": 1793289663481
  },
  "LINK": {
-  "bar_ts": 1793145600000,
-  "dir": "long",
-  "sent_ms": 1793172989589
+  "bar_ts": 1793304000000,
+  "dir": "short",
+  "sent_ms": 1793318462013
  },
  "SOL": {
-  "bar_ts": 1792994400000,
+  "bar_ts": 1793304000000,
   "dir": "short",
-  "sent_ms": 1793001361949
+  "sent_ms": 1793318462013
  },
  "SUI": {
-  "bar_ts": 1793203200000,
-  "dir": "long",
-  "sent_ms": 1793217660820
+  "bar_ts": 1793304000000,
+  "dir": "short",
+  "sent_ms": 1793318462013
  },
  "XRP": {
-  "bar_ts": 1793145600000,
-  "dir": "long",
-  "sent_ms": 1793172989589
+  "bar_ts": 1793304000000,
+  "dir": "short",
+  "sent_ms": 1793318462013
  },
  "_auto_err_ms": 1793271666191,
  "_history": [
@@ -70,7 +70,68 @@
    "pnl": -565.70996988
   }
  ],
- "_last_4h": 1793289600000,
+ "_last_4h": 1793304000000,
  "_tg_offset": 22371617,
- "_trades": {}
+ "_trades": {
+  "AVAX-USD_UM_XPERP-310801": {
+   "base": "AVAX",
+   "be": false,
+   "dir": "short",
+   "entry": 8.262,
+   "ids": {
+    "sl": "4053915121147719681"
+   },
+   "opened_ms": 1793318485492,
+   "sl": 8.74970526577084,
+   "strategy": "donchian",
+   "sz": 991.0,
+   "tick": 0.001,
+   "trail_bar": 1793304000000
+  },
+  "BTC-USD_UM_XPERP-310328": {
+   "base": "BTC",
+   "be": false,
+   "dir": "short",
+   "entry": 77777.58839412601,
+   "ids": {
+    "sl": "4053914599846064129"
+   },
+   "opened_ms": 1793318469961,
+   "sl": 80068.86730038079,
+   "strategy": "donchian",
+   "sz": 0.2111,
+   "tick": 0.1,
+   "trail_bar": 1793304000000
+  },
+  "DOGE-USD_UM_XPERP-310516": {
+   "base": "DOGE",
+   "be": false,
+   "dir": "short",
+   "entry": 0.0747721310980244,
+   "ids": {
+    "sl": "4053914986124685313"
+   },
+   "opened_ms": 1793318481472,
+   "sl": 0.07842445580702266,
+   "strategy": "donchian",
+   "sz": 13242.0,
+   "tick": 1e-05,
+   "trail_bar": 1793304000000
+  },
+  "ETH-USD_UM_XPERP-310328": {
+   "base": "ETH",
+   "be": false,
+   "dir": "short",
+   "entry": 2251.65,
+   "ids": {
+    "sl": "4053914741747757057"
+   },
+   "opened_ms": 1793318474189,
+   "sl": 2336.7523022282876,
+   "strategy": "donchian",
+   "sz": 5683.0,
+   "tick": 0.01,
+   "trail_bar": 1793304000000
+  }
+ }
 }

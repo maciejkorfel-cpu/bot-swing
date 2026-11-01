@@ -76,7 +76,7 @@
    "pnl": -479.7852165273899
   }
  ],
- "_last_4h": 1793520000000,
+ "_last_4h": 1793534400000,
  "_tg_offset": 22371619,
  "_trades": {
   "BTC-USD_UM_XPERP-310328": {
@@ -92,7 +92,7 @@
    "strategy": "donchian",
    "sz": 0.2111,
    "tick": 0.1,
-   "trail_bar": 1793520000000
+   "trail_bar": 1793534400000
   },
   "DOGE-USD_UM_XPERP-310516": {
    "base": "DOGE",
@@ -107,7 +107,7 @@
    "strategy": "donchian",
    "sz": 13242.0,
    "tick": 1e-05,
-   "trail_bar": 1793520000000
+   "trail_bar": 1793534400000
   },
   "ETH-USD_UM_XPERP-310328": {
    "base": "ETH",
@@ -122,7 +122,7 @@
    "strategy": "donchian",
    "sz": 5683.0,
    "tick": 0.01,
-   "trail_bar": 1793520000000
+   "trail_bar": 1793534400000
   }
  }
 }

@@ -74,6 +74,12 @@
    "closed_ms": 1793508638358,
    "dir": "short",
    "pnl": -479.7852165273899
+  },
+  {
+   "base": "ETH",
+   "closed_ms": 1793583932978,
+   "dir": "short",
+   "pnl": -713.5803185276535
   }
  ],
  "_last_4h": 1793563200000,
@@ -107,21 +113,6 @@
    "strategy": "donchian",
    "sz": 13242.0,
    "tick": 1e-05,
-   "trail_bar": 1793563200000
-  },
-  "ETH-USD_UM_XPERP-310328": {
-   "base": "ETH",
-   "be": false,
-   "dir": "short",
-   "entry": 2251.65,
-   "ids": {
-    "sl": "4053914741747757057"
-   },
-   "opened_ms": 1793318474189,
-   "sl": 2336.7523022282876,
-   "strategy": "donchian",
-   "sz": 5683.0,
-   "tick": 0.01,
    "trail_bar": 1793563200000
   }
  }

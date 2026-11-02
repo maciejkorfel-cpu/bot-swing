@@ -25,9 +25,9 @@
   "sent_ms": 1793318462013
  },
  "HYPE": {
-  "bar_ts": 1793275200000,
-  "dir": "long",
-  "sent_ms": 1793289663481
+  "bar_ts": 1793592000000,
+  "dir": "short",
+  "sent_ms": 1793606462990
  },
  "LINK": {
   "bar_ts": 1793304000000,
@@ -82,7 +82,7 @@
    "pnl": -713.5803185276535
   }
  ],
- "_last_4h": 1793577600000,
+ "_last_4h": 1793592000000,
  "_tg_offset": 22371619,
  "_trades": {
   "BTC-USD_UM_XPERP-310328": {
@@ -98,7 +98,7 @@
    "strategy": "donchian",
    "sz": 0.2111,
    "tick": 0.1,
-   "trail_bar": 1793577600000
+   "trail_bar": 1793592000000
   },
   "DOGE-USD_UM_XPERP-310516": {
    "base": "DOGE",
@@ -113,7 +113,7 @@
    "strategy": "donchian",
    "sz": 13242.0,
    "tick": 1e-05,
-   "trail_bar": 1793577600000
+   "trail_bar": 1793592000000
   }
  }
 }

@@ -10,9 +10,9 @@
   "sent_ms": 1793764862348
  },
  "BTC": {
-  "bar_ts": 1793304000000,
-  "dir": "short",
-  "sent_ms": 1793318462013
+  "bar_ts": 1793793600000,
+  "dir": "long",
+  "sent_ms": 1793808064264
  },
  "DOGE": {
   "bar_ts": 1793304000000,
@@ -35,19 +35,19 @@
   "sent_ms": 1793764862348
  },
  "SOL": {
-  "bar_ts": 1793635200000,
-  "dir": "short",
-  "sent_ms": 1793649664805
+  "bar_ts": 1793793600000,
+  "dir": "long",
+  "sent_ms": 1793808064264
  },
  "SUI": {
-  "bar_ts": 1793779200000,
+  "bar_ts": 1793793600000,
   "dir": "long",
-  "sent_ms": 1793793669633
+  "sent_ms": 1793808064264
  },
  "XRP": {
-  "bar_ts": 1793707200000,
+  "bar_ts": 1793793600000,
   "dir": "long",
-  "sent_ms": 1793721667353
+  "sent_ms": 1793808064264
  },
  "_auto_err_ms": 1793361922242,
  "_history": [
@@ -88,9 +88,24 @@
    "pnl": -380.770135530537
   }
  ],
- "_last_4h": 1793779200000,
+ "_last_4h": 1793793600000,
  "_tg_offset": 22371620,
  "_trades": {
+  "BTC-USD_UM_XPERP-310328": {
+   "base": "BTC",
+   "be": false,
+   "dir": "long",
+   "entry": 80472.98168430741,
+   "ids": {
+    "sl": "4070342911459864577"
+   },
+   "opened_ms": 1793808071815,
+   "sl": 78273.59846424253,
+   "strategy": "donchian",
+   "sz": 0.2173,
+   "tick": 0.1,
+   "trail_bar": 1793793600000
+  },
   "DOGE-USD_UM_XPERP-310516": {
    "base": "DOGE",
    "be": false,
@@ -104,7 +119,7 @@
    "strategy": "donchian",
    "sz": 13242.0,
    "tick": 1e-05,
-   "trail_bar": 1793779200000
+   "trail_bar": 1793793600000
   },
   "ETH-USD_UM_XPERP-310328": {
    "base": "ETH",
@@ -119,7 +134,7 @@
    "strategy": "donchian",
    "sz": 7322.0,
    "tick": 0.01,
-   "trail_bar": 1793779200000
+   "trail_bar": 1793793600000
   }
  }
 }

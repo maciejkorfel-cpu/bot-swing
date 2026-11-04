@@ -80,26 +80,17 @@
    "closed_ms": 1793583932978,
    "dir": "short",
    "pnl": -713.5803185276535
+  },
+  {
+   "base": "BTC",
+   "closed_ms": 1793804843426,
+   "dir": "short",
+   "pnl": -380.770135530537
   }
  ],
  "_last_4h": 1793779200000,
  "_tg_offset": 22371620,
  "_trades": {
-  "BTC-USD_UM_XPERP-310328": {
-   "base": "BTC",
-   "be": false,
-   "dir": "short",
-   "entry": 77777.58839412601,
-   "ids": {
-    "sl": "4053914599846064129"
-   },
-   "opened_ms": 1793318469961,
-   "sl": 80068.86730038079,
-   "strategy": "donchian",
-   "sz": 0.2111,
-   "tick": 0.1,
-   "trail_bar": 1793779200000
-  },
   "DOGE-USD_UM_XPERP-310516": {
    "base": "DOGE",
    "be": false,

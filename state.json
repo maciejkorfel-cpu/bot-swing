@@ -1,8 +1,8 @@
 {
  "AVAX": {
-  "bar_ts": 1793304000000,
+  "bar_ts": 1793880000000,
   "dir": "short",
-  "sent_ms": 1793318462013
+  "sent_ms": 1793894467803
  },
  "BCH": {
   "bar_ts": 1793865600000,
@@ -25,9 +25,9 @@
   "sent_ms": 1793793669633
  },
  "HYPE": {
-  "bar_ts": 1793635200000,
+  "bar_ts": 1793880000000,
   "dir": "short",
-  "sent_ms": 1793649664805
+  "sent_ms": 1793894467803
  },
  "LINK": {
   "bar_ts": 1793750400000,
@@ -40,9 +40,9 @@
   "sent_ms": 1793808064264
  },
  "SUI": {
-  "bar_ts": 1793793600000,
-  "dir": "long",
-  "sent_ms": 1793808064264
+  "bar_ts": 1793880000000,
+  "dir": "short",
+  "sent_ms": 1793894467803
  },
  "XRP": {
   "bar_ts": 1793793600000,
@@ -100,9 +100,24 @@
    "pnl": -864.2489580441326
   }
  ],
- "_last_4h": 1793865600000,
+ "_last_4h": 1793880000000,
  "_tg_offset": 22371620,
  "_trades": {
+  "AVAX-USD_UM_XPERP-310801": {
+   "base": "AVAX",
+   "be": false,
+   "dir": "short",
+   "entry": 8.177,
+   "ids": {
+    "sl": "4073242418547798017"
+   },
+   "opened_ms": 1793894483839,
+   "sl": 8.63759731490468,
+   "strategy": "donchian",
+   "sz": 1023.0,
+   "tick": 0.001,
+   "trail_bar": 1793880000000
+  },
   "DOGE-USD_UM_XPERP-310516": {
    "base": "DOGE",
    "be": false,
@@ -116,7 +131,22 @@
    "strategy": "donchian",
    "sz": 13242.0,
    "tick": 1e-05,
-   "trail_bar": 1793865600000
+   "trail_bar": 1793880000000
+  },
+  "HYPE-USD_UM_XPERP-310801": {
+   "base": "HYPE",
+   "be": false,
+   "dir": "short",
+   "entry": 78.55146226415094,
+   "ids": {
+    "sl": "4073242237320310785"
+   },
+   "opened_ms": 1793894478442,
+   "sl": 83.48913284996156,
+   "strategy": "donchian",
+   "sz": 954.0,
+   "tick": 0.0001,
+   "trail_bar": 1793880000000
   }
  }
 }

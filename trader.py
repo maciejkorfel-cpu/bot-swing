@@ -198,6 +198,7 @@ class Trader:
 
         self.st["_trades"][inst] = {"base": base, "dir": s["dir"], "entry": entry, "sl": sl, "sz": real_sz,
                                     "ids": ids, "be": False, "strategy": "donchian", "tick": tick,
+                                    "risk": round(real_sz * ct * dist, 2),          # 1R w USDC
                                     "trail_bar": s["bar_ts"], "opened_ms": int(time.time() * 1000)}
         return True, (f"{'🟢 LONG' if long_ else '🔴 SHORT'} {base} — OTWARTO AUTOMATYCZNIE (demo)\n"
                       f"Strategia: wybicie kanału 20 świec 4H\nKontrakt: {inst}\nWejście: {entry}\n"
@@ -250,8 +251,11 @@ class Trader:
                         pnl = f"\nWynik: {val:+.2f} USDC"
                 except Exception:  # noqa: BLE001
                     pass
-                self.st.setdefault("_history", []).append(
-                    {"base": t["base"], "dir": t["dir"], "pnl": val, "closed_ms": int(time.time() * 1000)})
+                rec = {"base": t["base"], "dir": t["dir"], "pnl": val, "closed_ms": int(time.time() * 1000)}
+                if val is not None and t.get("risk"):
+                    rec["r"] = round(val / t["risk"], 2)              # wynik w R (1R = planowane ryzyko)
+                    pnl += f" ({rec['r']:+.2f} R)"
+                self.st.setdefault("_history", []).append(rec)
                 self.st["_history"] = self.st["_history"][-200:]
                 self.send(f"🏁 {t['base']} {t['dir'].upper()} zamknięta (demo){pnl}")
                 del trades[inst]
@@ -266,6 +270,22 @@ class Trader:
                     self.send(f"🎯 {t['base']}: TP1 zrealizowany, SL przesunięty na wejście {t['entry']}")
                 except Exception as e:  # noqa: BLE001
                     self.send(f"⚠️ {t['base']}: TP1 zrealizowany, ale nie udało się przesunąć SL: {e}")
+
+    # ---------- ocena na demo ----------
+    EVAL_N = 20          # tyle strat z pomiarem R potrzeba do oceny
+    MAX_AVG_LOSS = 1.2   # backtest: przy średniej stracie > 1,2R (poślizg > 0,2R) przewaga znika
+
+    def evaluation(self, hist):
+        """Mierzy to, co da się ocenić na demo: średnią stratę na SL w R (koszt poślizgu)."""
+        losses = [h["r"] for h in hist if "r" in h and h["r"] < 0]
+        if not losses:
+            return ["", "🧪 Ocena: brak jeszcze strat z pomiarem R"]
+        avg = -sum(losses) / len(losses)
+        out = ["", f"🧪 Ocena (śr. strata na SL): {avg:.2f} R z {len(losses)}/{self.EVAL_N} strat | próg {self.MAX_AVG_LOSS} R"]
+        if len(losses) >= self.EVAL_N:
+            out.append("❌ Za duży poślizg — strategia po kosztach nie ma przewagi. Wyłącz bota."
+                       if avg > self.MAX_AVG_LOSS else "✅ Poślizg w normie — strategia może działać dalej.")
+        return out
 
     # ---------- podsumowanie na żądanie ----------
     def summary(self):
@@ -303,7 +323,9 @@ class Trader:
             lines.append(f"Od startu: {len(hist)} transakcji | trafione {wins}/{len(hist)} | "
                          f"wynik {sum(h['pnl'] for h in hist):+.2f} USDC")
             for h in hist[-3:]:
-                lines.append(f"  · {h['base']} {h['dir'].upper()}: {h['pnl']:+.2f} USDC")
+                lines.append(f"  · {h['base']} {h['dir'].upper()}: {h['pnl']:+.2f} USDC"
+                             + (f" ({h['r']:+.2f} R)" if "r" in h else ""))
+            lines += self.evaluation(hist)
         else:
             lines.append("Od startu: brak zamkniętych transakcji bota")
         return "\n".join(lines)

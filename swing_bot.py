@@ -107,7 +107,7 @@ def contract_info(base):
     """Kontrakt X-Perp z konta demo (ctVal = ile coina w 1 kontrakcie)."""
     try:
         data = okx_get("/api/v5/public/instruments", {"instType": "FUTURES"}, demo=True)
-        cands = [d for d in data if d["instId"].startswith(f"{base}-USD_UM_XPERP")]
+        cands = [d for d in data if d["instId"].startswith(f"{base}-USD_UM_XPERP") and d.get("state") == "live"]
         if cands:
             d = cands[0]
             return d["instId"], float(d["ctVal"]), float(d["tickSz"])
@@ -228,10 +228,17 @@ def send_telegram(text):
     if not (TG_TOKEN and TG_CHAT):
         print("[brak TELEGRAM_TOKEN/CHAT_ID]\n" + text)
         return
-    r = session.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-                     json={"chat_id": TG_CHAT, "text": text}, timeout=15)
-    if not r.ok:
-        print("Telegram error:", r.text)
+    # błąd Telegrama nie może przerwać przebiegu: inaczej otwarta pozycja nie trafi do state.json
+    for attempt in range(3):
+        try:
+            r = session.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+                             json={"chat_id": TG_CHAT, "text": text}, timeout=15)
+            if r.ok:
+                return
+            print("Telegram error:", r.text)
+        except Exception as e:  # noqa: BLE001
+            print("Telegram error:", e)
+        time.sleep(2)
 
 
 def load_state():

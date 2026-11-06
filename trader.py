@@ -108,6 +108,9 @@ class Trader:
     def open_trade(self, base, s, spot_price):
         """Zwraca (True, opis) albo (False, powód pominięcia)."""
         trades = self.st["_trades"]
+        blocked = self.st.setdefault("_blocked", [])
+        if base in blocked:
+            return False, "para niedostępna na OKX w Twoim regionie (ograniczenia prawne) — pomijam"
         if self.max_pos and len(trades) >= self.max_pos:
             return False, f"limit {self.max_pos} pozycji"
         ins = self.instrument(base)
@@ -137,6 +140,12 @@ class Trader:
         sz = float(_round(risk / dist / ct, lot, "down"))
         if sz < min_sz:
             return False, "za mała ilość"
+        # OKX ma maks. wielkość jednego zlecenia rynkowego i stop (maxMktSz / maxStopSz).
+        # Większe zlecenie jest odrzucane ("Market order amount exceeds the maximum amount").
+        caps = [float(ins[k]) for k in ("maxMktSz", "maxStopSz") if float(ins.get(k) or 0) > 0]
+        capped = bool(caps) and sz > min(caps)
+        if capped:
+            sz = float(_round(min(caps), lot, "down"))
         if sz * ct * px / self.lev > avail * 0.9:
             return False, "za mało wolnego depozytu"
 
@@ -158,8 +167,14 @@ class Trader:
 
         self.x.post("/api/v5/account/set-leverage",
                     {"instId": inst, "lever": str(self.lev), "mgnMode": "isolated", **pos_side})
-        o = self.x.post("/api/v5/trade/order", {"instId": inst, "tdMode": "isolated", "side": side,
-                                                "ordType": "market", "sz": _round(sz, lot), **pos_side})[0]
+        try:
+            o = self.x.post("/api/v5/trade/order", {"instId": inst, "tdMode": "isolated", "side": side,
+                                                    "ordType": "market", "sz": _round(sz, lot), **pos_side})[0]
+        except RuntimeError as e:
+            if "compliance" in str(e).lower():
+                blocked.append(base)                    # nie próbujemy więcej tej pary
+                return False, "para niedostępna na OKX w Twoim regionie (ograniczenia prawne) — wyłączona z auto-handlu"
+            raise
         time.sleep(1.5)
         pos = self.positions().get(inst)
         if not pos:
@@ -172,7 +187,10 @@ class Trader:
         try:
             ids["sl"] = self._algo(inst, close_side, pos_side,
                                    {"ordType": "conditional", "sz": _round(real_sz, lot),
-                                    "slTriggerPx": _round(sl, tick), "slOrdPx": "-1"})
+                                    "slTriggerPx": _round(sl, tick), "slOrdPx": "-1",
+                                    # cena "last" w demo bywa przypadkowa (pojedyncze transakcje
+                                    # w płytkim order booku), więc stop wyzwalamy ceną mark
+                                    "slTriggerPxType": "mark"})
         except Exception as e:  # noqa: BLE001
             # bez SL nie zostawiamy pozycji — zamykamy ją od razu
             self.x.post("/api/v5/trade/close-position", {"instId": inst, "mgnMode": "isolated", **pos_side})
@@ -185,7 +203,8 @@ class Trader:
                       f"Strategia: wybicie kanału 20 świec 4H\nKontrakt: {inst}\nWejście: {entry}\n"
                       f"SL: {_round(sl, tick)} (trailing 5,5 ATR po każdej świecy 4H, bez TP)\n"
                       f"Ilość: {real_sz:g} kontraktów | ryzyko ~{round(real_sz * ct * dist)} USDC"
-                      + ("\n(ilość zmniejszona — płytki order book demo)" if cut else ""))
+                      + ("\n(ilość zmniejszona — płytki order book demo)" if cut else "")
+                      + ("\n(ilość ograniczona do maks. wielkości zlecenia OKX)" if capped else ""))
 
     def _algo(self, inst, close_side, pos_side, body):
         b = {"instId": inst, "tdMode": "isolated", "side": close_side, **pos_side, **body}
@@ -197,8 +216,8 @@ class Trader:
         """Przesuwa SL (trailing). Gdy cena jest już za nowym poziomem, zamyka pozycję rynkowo."""
         long_ = t["dir"] == "long"
         tick = t.get("tick") or float(self.instrument(t["base"])["tickSz"])
-        tk = self.ticker(inst)
-        last = float(tk.get("last") or 0)
+        tk = self.x.get("/api/v5/public/mark-price", instType="FUTURES", instId=inst)[0]
+        last = float(tk.get("markPx") or 0)                 # porównujemy z mark, jak wyzwalacz SL
         pos_side = {"posSide": t["dir"]} if self.hedge else {}
         if last and ((last <= new_sl) if long_ else (last >= new_sl)):
             self.x.post("/api/v5/trade/close-position", {"instId": inst, "mgnMode": "isolated", **pos_side})
@@ -225,7 +244,8 @@ class Trader:
                 pnl, val = "", None
                 try:
                     h = self.x.get("/api/v5/account/positions-history", instType="FUTURES", instId=inst, limit="1")
-                    if h:
+                    # bierzemy wynik tylko, jeśli to zamknięcie tej pozycji (a nie wcześniejszej na tym kontrakcie)
+                    if h and int(h[0].get("uTime") or 0) >= t.get("opened_ms", 0):
                         val = float(h[0].get('realizedPnl') or h[0].get('pnl') or 0)
                         pnl = f"\nWynik: {val:+.2f} USDC"
                 except Exception:  # noqa: BLE001

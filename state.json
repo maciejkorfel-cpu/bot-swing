@@ -5,9 +5,9 @@
   "sent_ms": 1793894467803
  },
  "BCH": {
-  "bar_ts": 1793937600000,
+  "bar_ts": 1794038400000,
   "dir": "short",
-  "sent_ms": 1793952062561
+  "sent_ms": 1794052859624
  },
  "BTC": {
   "bar_ts": 1793793600000,
@@ -101,7 +101,7 @@
    "pnl": -864.2489580441326
   }
  ],
- "_last_4h": 1794024000000,
+ "_last_4h": 1794038400000,
  "_tg_offset": 22371620,
  "_trades": {
   "AVAX-USD_UM_XPERP-310801": {
@@ -117,7 +117,7 @@
    "strategy": "donchian",
    "sz": 1023.0,
    "tick": 0.001,
-   "trail_bar": 1794024000000
+   "trail_bar": 1794038400000
   },
   "DOGE-USD_UM_XPERP-310516": {
    "base": "DOGE",
@@ -132,7 +132,7 @@
    "strategy": "donchian",
    "sz": 13242.0,
    "tick": 1e-05,
-   "trail_bar": 1794024000000
+   "trail_bar": 1794038400000
   },
   "HYPE-USD_UM_XPERP-310801": {
    "base": "HYPE",
@@ -147,7 +147,7 @@
    "strategy": "donchian",
    "sz": 954.0,
    "tick": 0.0001,
-   "trail_bar": 1794024000000
+   "trail_bar": 1794038400000
   }
  }
 }

@@ -108,26 +108,17 @@
    "dir": "short",
    "pnl": -976.324236312,
    "r": -2.04
+  },
+  {
+   "base": "AVAX",
+   "closed_ms": 1794230722695,
+   "dir": "short",
+   "pnl": -474.8524356
   }
  ],
  "_last_4h": 1794211200000,
  "_tg_offset": 22371620,
  "_trades": {
-  "AVAX-USD_UM_XPERP-310801": {
-   "base": "AVAX",
-   "be": false,
-   "dir": "short",
-   "entry": 8.177,
-   "ids": {
-    "sl": "4073242418547798017"
-   },
-   "opened_ms": 1793894483839,
-   "sl": 8.63759731490468,
-   "strategy": "donchian",
-   "sz": 1023.0,
-   "tick": 0.001,
-   "trail_bar": 1794211200000
-  },
   "BTC-USD_UM_XPERP-310328": {
    "base": "BTC",
    "be": false,

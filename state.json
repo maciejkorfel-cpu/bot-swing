@@ -137,7 +137,7 @@
    "r": -1.32
   }
  ],
- "_last_4h": 1794988800000,
+ "_last_4h": 1795003200000,
  "_tg_offset": 22371621,
  "_trades": {
   "AVAX-USD_UM_XPERP-310801": {
@@ -150,11 +150,11 @@
    },
    "opened_ms": 1794672071754,
    "risk": 481.97,
-   "sl": 8.1620833080806,
+   "sl": 8.081847252562842,
    "strategy": "donchian",
    "sz": 964.0,
    "tick": 0.001,
-   "trail_bar": 1794988800000
+   "trail_bar": 1795003200000
   },
   "BTC-USD_UM_XPERP-310328": {
    "base": "BTC",
@@ -166,11 +166,11 @@
    },
    "opened_ms": 1794182470495,
    "risk": 478.46,
-   "sl": 70614.77101296608,
+   "sl": 69638.08921760133,
    "strategy": "donchian",
    "sz": 0.2957,
    "tick": 0.1,
-   "trail_bar": 1794988800000
+   "trail_bar": 1795003200000
   },
   "DOGE-USD_UM_XPERP-310516": {
    "base": "DOGE",
@@ -181,11 +181,11 @@
     "sl": "4053914986124685313"
    },
    "opened_ms": 1793318481472,
-   "sl": 0.06704929183058425,
+   "sl": 0.06641896656660443,
    "strategy": "donchian",
    "sz": 13242.0,
    "tick": 1e-05,
-   "trail_bar": 1794988800000
+   "trail_bar": 1795003200000
   },
   "ETH-USD_UM_XPERP-310328": {
    "base": "ETH",
@@ -201,7 +201,7 @@
    "strategy": "donchian",
    "sz": 5287.0,
    "tick": 0.01,
-   "trail_bar": 1794988800000
+   "trail_bar": 1795003200000
   },
   "HYPE-USD_UM_XPERP-310801": {
    "base": "HYPE",
@@ -216,7 +216,7 @@
    "strategy": "donchian",
    "sz": 954.0,
    "tick": 0.0001,
-   "trail_bar": 1794988800000
+   "trail_bar": 1795003200000
   },
   "XRP-USD_UM_XPERP-310801": {
    "base": "XRP",
@@ -232,7 +232,7 @@
    "strategy": "donchian",
    "sz": 5615.0,
    "tick": 0.001,
-   "trail_bar": 1794988800000
+   "trail_bar": 1795003200000
   }
  }
 }

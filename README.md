@@ -4,32 +4,47 @@
 > uruchamia darmowy [cron-job.org](https://cron-job.org) (zapytanie POST do GitHub API,
 > `workflow_dispatch` z `cicho=true`). Cron GitHuba co 15 min zostaje jako zapas.
 
-Bez kluczy API OKX bot tylko wysyła sygnały; z kluczami konta demo sam otwiera pozycje. Co 5 minut skanuje 10 par
-(BTC, ETH, SOL, XRP, HYPE, DOGE, AVAX, LINK, SUI, BCH). Gdy setup spełnia wszystkie
-warunki, wysyła na Telegram gotowe dane do zlecenia. Pozycję otwierasz sam w telefonie.
+Bez kluczy API OKX bot tylko wysyła sygnały; z kluczami konta demo sam otwiera pozycje. Co 5 minut skanuje 13 par
+z kontraktem X-Perp na demo (BTC, ETH, XRP, HYPE, DOGE, AVAX, LINK, SUI, BCH, DOT, FIL, NEAR, UNI).
 
-## Strategia: wybicie kanału Donchiana 4H
+## Strategia v2 (od 11.2026): wybicie kanału 4H, tylko LONG, stop na zamknięciu świecy
 
 | Krok | Warunek |
 |---|---|
-| Wejście LONG | Zamknięcie świecy 4H powyżej najwyższego high z 20 poprzednich świec |
-| Wejście SHORT | Zamknięcie świecy 4H poniżej najniższego low z 20 poprzednich świec |
-| SL startowy | 2 x ATR(14) z 4H od wejścia |
-| Trailing | Po każdej zamkniętej świecy 4H SL = zamknięcie -/+ 5,5 x ATR, tylko w stronę zysku. Bez TP. |
-| Wielkość | RISK_PCT (domyślnie 0,5%) kapitału ryzyka na transakcję, marża izolowana 3x |
-| Limit pozycji | brak (MAX_POSITIONS=0); jedna pozycja na parę |
-| Filtr BTC | opcjonalny (BTC_FILTER=1): long tylko gdy BTC > EMA300 4H, short tylko pod |
+| Wejście LONG | Zamknięcie 4H > najwyższe high z 40 poprzednich świec **i** zamknięcie > EMA200 (4H) tej pary |
+| SL startowy | 2 x ATR(14) 4H od wejścia = 1R (od tego liczona wielkość) |
+| Wyjście | Po każdej świecy 4H SL = max(SL, najniższe low z 20 świec), tylko w górę. Gdy świeca 4H rynku **spot** ZAMKNIE się pod SL → zamknięcie rynkowe. Bez TP. |
+| SL awaryjny | Na giełdzie demo, 2R od wejścia (ochrona przed krachem między przebiegami) |
+| Wielkość | RISK_PCT (0,5%) kapitału na transakcję, marża izolowana 3x |
+| Limit | maks. 6 pozycji w jedną stronę (MAX_SAME_DIR), jedna pozycja na parę |
 
-### Wyniki backtestu (dane OKX 4H, X 2023 - X 2026, 9 par z kontraktem demo, prowizje 0,08%/stronę, ryzyko 0,5%)
+### Dlaczego zmiana (analiza 19.11.2026)
 
-| Wariant | Transakcje | Trafność | PF | Wynik | Obsunięcie | Ostatnie 14 mies. |
+1. **Konto demo psuło stopy.** Cena kontraktów X-Perp w demo odbiega od rynku. Na żywo bot zamknął
+   13 z 14 transakcji na minusie, kilka po -2R (np. short ETH 9.11: na demo -2,04R, a na rynku spot ta sama
+   pozycja była nadal otwarta na +4,9R). Backtest starej strategii na tym samym okresie dał +19R.
+   Dlatego stop jest teraz liczony na zamknięciu świecy spot, a na giełdzie stoi tylko szeroki SL awaryjny.
+2. **Stara strategia słabła poza próbą.** Test: parametry dobrane na 2019-2023, sprawdzone na 2024-11.2026.
+   Short i trailing 5,5 ATR traciły przewagę; long z filtrem EMA200 i wyjściem po kanale 20 świec trzymał się
+   w każdym wariancie parametrów (30-60 świec wejścia, stop 1,5-3 ATR).
+
+### Wyniki backtestu (OKX spot 4H, 2019 - 11.2026, 20 par, prowizje+poślizg 0,08%/stronę, funding 0,01%/8h, ryzyko 0,5%, procent składany)
+
+| Wariant | Okres | Transakcje | Trafność | PF | Wynik | Obsunięcie |
 |---|---|---|---|---|---|---|
-| **Bez filtra BTC (domyślny)** | 883 | 26% | 1,59 | +379R (ok. +447%) | 36% | PF 1,31, +49% |
-| Z filtrem BTC | 749 | 24% | 1,50 | +280R (ok. +242%) | 34% | PF 1,07, +7% |
+| **v2 (obecna)** | 2019-23 (dobór) | 666 | 35% | 2,45 | +1636% | 31% |
+| **v2 (obecna)** | **2024-11.2026 (poza próbą)** | 466 | 30% | **1,71** | **+155%** | 26% |
+| **v2 (obecna)** | ostatnie 12 mies. (bessa) | 174 | 25% | 1,17 | +5% | 23% |
+| v1 (stara, L/S 20, trailing 5,5 ATR) | 2024-11.2026 | 889 | 25% | 1,27 | +79% | 36% |
+| v1 (stara) | ostatnie 12 mies. | 335 | 22% | 1,04 | -2% | 36% |
 
-Trafność jest niska: zysk robią nieliczne długie ruchy. Serie 10-20 strat z rzędu są normalne.
-Pary chodzą razem, więc bez limitu bywa otwartych naraz do 9 pozycji w tę samą stronę.
-Na mniejszych altach (DOT, LTC, FIL...) strategia dawała wynik ok. zera.
+Na samych 13 parach bota (poza próbą): PF 2,00, +187%, obsunięcie 15%. Na 7 parach spoza listy: PF 1,35, +39%.
+
+**Czego się spodziewać:** 65-75% transakcji to małe straty (~1R), zysk robią nieliczne długie trendy.
+W bessie (cena pod EMA200) bot prawie nie handluje, tak ma być. W 2022 strategia traciła (ok. -10%),
+w ostatnich 12 miesiącach wyszła na niewielki plus. Wyniki z przeszłości niczego nie gwarantują.
+
+Stare pozycje otwarte przed zmianą (short, strategia v1) dalej mają trailing 5,5 ATR, aż się zamkną.
 
 ## Instalacja (ok. 10 minut)
 
@@ -53,36 +68,30 @@ Na mniejszych altach (DOT, LTC, FIL...) strategia dawała wynik ok. zera.
 5. **Backtest** (w Codespaces):
    ```
    pip install requests
-   python swing_bot.py --backtest    # ok. 80 dni historii 1H
+   python swing_bot.py --backtest    # strategia v2, ok. 500 dni historii 4H na parę
    python swing_bot.py --dry         # bieżący skan bez wysyłania
    ```
 
 ## Jak wygląda sygnał
 
 ```
-🔴 SHORT HYPE — sygnał SWING
-Kontrakt: HYPE-USD_UM_XPERP-310801
+🟢 LONG ETH — wybicie kanału 40 świec 4H (nad EMA200)
+Kontrakt: ETH-USD_UM_XPERP-310801
 
-Wejście:  76.950  (limit lub rynek)
-SL:       77.880
-TP1:      75.555  (1,5R — zamknij 30%, SL przesuń na wejście)
-Trailing: reszta (70%) — aktywacja 75.555, callback 2.4%
-          (bez górnego TP — trailing zamknie pozycję)
+Wejście:  3 001.00  (rynek)
+SL:       2 900.00  (2 x ATR 4H) — zamknij, gdy świeca 4H ZAMKNIE się pod nim
+SL awaryjny na giełdzie: 2 799.00
+Wyjście:  po każdej świecy 4H podnieś SL do najniższego low z 20 świec (tylko w górę), bez TP
 
-Ilość:    5 340 kontraktów
-Wartość:  ~41 100 USD | marża izolowana 3x ≈ 13 700 USDC
-Ryzyko:   ~497 USDC (0.5% kapitału)
-
-Trend 4H (EMA50/200): spadkowy | RSI 1H 44 | ATR 1H 0.62
-Ważny do: 24.10 14:00 — potem nie wchodź
-Przycisk: Sprzedaj (krótkie), zaznacz TP/SL (TP1 na 30% ilości), potem dodaj Trailing stop
+Ilość:    49 kontraktów
+Wartość:  ~14 700 USD | marża izolowana 3x ≈ 4 900 USDC
+Ryzyko:   ~495 USDC (0.5% kapitału)
 ```
 
-Po otrzymaniu sygnału w aplikacji OKX (**Handel demo** → Futures → para):
-1. Izolowane 3x → Z limitem → cena i ilość z sygnału → zaznacz TP/SL: SL z sygnału, TP1 → przycisk z sygnału.
-2. Gdy pozycja wejdzie: **Trailing stop** na 70% ilości, cena aktywacji = TP1, callback z sygnału
-   (opcja „Tylko redukcja”). TP1 ustaw na 30% ilości (zaawansowane TP/SL).
-3. Po TP1 przesuń SL na cenę wejścia.
+Ręcznie w aplikacji OKX (**Handel demo** → Futures → para):
+1. Izolowane 3x → Rynek → ilość z sygnału → zaznacz SL = **SL awaryjny** z sygnału.
+2. Po każdej zamkniętej świecy 4H: jeśli zamknięcie jest pod SL z sygnału, zamknij pozycję.
+   W przeciwnym razie podnieś SL do najniższego low z 20 ostatnich świec 4H (tylko w górę).
 
 ---
 

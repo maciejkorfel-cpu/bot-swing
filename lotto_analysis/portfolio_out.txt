@@ -1,0 +1,12 @@
+maks. część wspólna dwóch zakładów: 0
+Portfel — liczba wyników (z 13 983 816), w których >=1 zakład ma k+ trafień: {3: 1299120, 4: 69020, 5: 1295, 6: 5}
+  P(>= 3) = 1299120/13983816 = 9.29017%
+  P(>= 4) = 69020/13983816 = 0.49357%
+  P(>= 5) = 1295/13983816 = 0.00926%
+  P(>= 6) = 5/13983816 = 0.00004%
+Górna granica (nierówność Boole'a) dla 5 zakładów: >=4: 69020 , >=5: 1295
+Losowe 5 różnych zakładów (dokładnie): P(>=4)=0.49260%  P(>=5)=0.009260%
+Różnica: >=4: +0.000973 pp, >=5: +0.0000003 pp
+Symulacja 300 losowych portfeli: P(>=3) śr=8.98496%  95% CI [8.96728%, 9.00264%]  min=8.43896%  odsetek portfeli na granicy optimum: nan
+Symulacja 300 losowych portfeli: P(>=4) śr=0.49272%  95% CI [0.49258%, 0.49286%]  min=0.48752%  odsetek portfeli na granicy optimum: 0.243
+Symulacja 300 losowych portfeli: P(>=5) śr=0.00926%  95% CI [0.00926%, 0.00926%]  min=0.00926%  odsetek portfeli na granicy optimum: 1.000

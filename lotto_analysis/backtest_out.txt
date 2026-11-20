@@ -1,0 +1,20 @@
+Losowania testowe: nr 501..7433 (1966-09-04 .. 2026-11-19), n=6933
+Teoria (5 rozłącznych zakładów): E[suma trafień]=3.6735, P(max>=3)=0.09290, P(max>=4)=0.004936
+Oczekiwane w n=6933: >=3: 644.1, >=4: 34.22
+strategia    śr.traf      z   >=3  p(>=3)  >=4  p(>=4)  >=5 | z_h1  z_h2
+hot_50        3.6870   1.00   655   0.332   31   0.733    1 | -0.17  1.58
+hot_200       3.6740   0.04   606   0.946   33   0.606    0 | -0.51  0.57
+hot_all       3.6929   1.43   658   0.288   26   0.938    0 |  1.95  0.08
+cold_50       3.6729  -0.04   621   0.835   36   0.403    2 |  0.40 -0.46
+cold_200      3.6719  -0.12   609   0.930   37   0.339    0 |  0.09 -0.25
+cold_all      3.6628  -0.79   652   0.378   33   0.606    0 | -0.39 -0.72
+overdue       3.6674  -0.45   663   0.222   35   0.470    0 |  0.45 -1.08
+fresh         3.6690  -0.33   654   0.347   38   0.280    1 | -0.35 -0.12
+pairs_200     3.7058   2.38   702   0.009   39   0.228    0 |  1.48  1.88
+pairs_all     3.6843   0.80   616   0.882   30   0.788    1 |  0.03  1.10
+random        3.6670  -0.48   657   0.302   30   0.788    0 | -0.62 -0.06
+
+2000 losowych strategii-kontroli: z śr=0.01 sd=1.01 max=3.74; >=3 śr=643.9 [596, 693]; >=4 śr=34.20 [24, 46]
+Najlepsze z wśród 10 metod: 2.38; P(max z z 10 losowych >= tego) ~ 0.10 (na 200 grupach); próg Bonferroniego (10 testów, alfa=0.05, dwustronnie): |z|>2.81
+Najlepsza w 1. połowie: hot_all (z=1.95); w 2. połowie z=0.08
+Najwięcej >=4 w 1. połowie: fresh (20 vs oczek. 17.1); w 2. połowie 18 vs oczek. 17.1

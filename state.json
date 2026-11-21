@@ -163,6 +163,13 @@
    "dir": "long",
    "pnl": -864.8360974000085,
    "r": -3.31
+  },
+  {
+   "base": "BTC",
+   "closed_ms": 1795268438244,
+   "dir": "short",
+   "pnl": -814.2787872598691,
+   "r": -1.7
   }
  ],
  "_last_4h": 1795248000000,
@@ -182,22 +189,6 @@
    "strategy": "donchian",
    "sz": 1184.0,
    "tick": 0.001,
-   "trail_bar": 1795248000000
-  },
-  "BTC-USD_UM_XPERP-310328": {
-   "base": "BTC",
-   "be": false,
-   "dir": "short",
-   "entry": 59257.30872374798,
-   "ids": {
-    "sl": "4116728676536037377"
-   },
-   "opened_ms": 1795190475342,
-   "risk": 479.62,
-   "sl": 61840.07894906178,
-   "strategy": "donchian",
-   "sz": 0.1857,
-   "tick": 0.1,
    "trail_bar": 1795248000000
   },
   "DOGE-USD_UM_XPERP-310516": {

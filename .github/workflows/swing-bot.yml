@@ -43,7 +43,8 @@ jobs:
           OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
           OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
           OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
-          MAX_POSITIONS: '0'              # 0 = bez limitu pozycji
+          MAX_POSITIONS: '0'              # 0 = bez limitu pozycji łącznie
+          MAX_SAME_DIR: '6'               # maks. pozycji w jedną stronę (strategia v2)
           BTC_FILTER: '0'                 # 1 = filtr trendu BTC (EMA300 4H)
           CAPITAL: ${{ vars.CAPITAL || '99400' }}
           RISK_PCT: ${{ vars.RISK_PCT || '0.5' }}

@@ -5,19 +5,19 @@ Co 5 min (cron-job.org -> GitHub Actions) sprawdza, czy zamknęła się nowa św
 Jeśli tak, szuka sygnałów i przesuwa trailing stopy otwartych pozycji.
 Z kluczami API konta demo sam otwiera pozycje (trader.py), bez nich wysyła sygnały.
 
-Strategia: wybicie kanału Donchiana 4H (opcjonalnie z filtrem trendu BTC, BTC_FILTER=1)
-  LONG : zamknięcie 4H > najwyższe high z 20 poprzednich świec
-  SHORT: zamknięcie 4H < najniższe low z 20 poprzednich świec
-  (z filtrem: long tylko gdy BTC > EMA300 4H, short tylko gdy BTC pod nią)
-  SL startowy: 2 x ATR(14) 4H od wejścia
-  Trailing: po każdej zamkniętej świecy 4H SL = zamknięcie -/+ 5,5 x ATR (tylko w stronę zysku)
-  Bez TP: pozycję zamyka SL/trailing. Wielkość = RISK_PCT kapitału / odległość do SL.
+Strategia v2: wybicie kanału Donchiana 4H, tylko LONG, z filtrem trendu pary
+  LONG : zamknięcie 4H > najwyższe high z 40 poprzednich świec ORAZ zamknięcie > EMA200 (4H)
+  SL startowy: 2 x ATR(14) 4H od wejścia (= 1R, od niego liczona wielkość)
+  Wyjście: SL "miękki" = max(SL startowy, najniższe low z 20 ostatnich świec 4H), sprawdzany
+           na ZAMKNIĘCIU świecy 4H rynku spot OKX -> zamknięcie pozycji rynkowo.
+  SL awaryjny na koncie demo: 2R od wejścia (tylko na wypadek krachu między przebiegami).
+  Maks. MAX_SAME_DIR (6) pozycji naraz. Bez TP.
+  Dlaczego stop na zamknięciu: cena kontraktu X-Perp w demo odbiega od rynku i wybijała
+  stopy z poślizgiem do -2R (np. ETH 11.2026), choć na rynku spot pozycja była na plusie.
 
-Backtest (9 par z kontraktem demo, 4H, X 2023 - X 2026, prowizje 0,08%/stronę, ryzyko 0,5%, bez limitu pozycji):
-  bez filtra BTC: 883 transakcje, trafność 26%, PF 1,59, +379R, ok. +447%, obsunięcie 36%
-                  ostatnie 14 mies.: PF 1,31, +49%
-  z filtrem BTC:  749 transakcji, PF 1,50, +280R, ok. +242%, obsunięcie 34%; ostatnie 14 mies.: PF 1,07
-  Jednocześnie otwartych bywało do 9 pozycji.
+Backtest (OKX spot 4H, 2019-2026, 20 par, prowizje+poślizg 0,08%/stronę, funding 0,01%/8h, ryzyko 0,5%):
+  2019-23 (dobór parametrów):  PF 2,45 | 2024-11.2026 (poza próbą): PF 1,71, ok. +155%, obsunięcie 26%
+  poprzednia strategia (L/S 20, trailing 5,5 ATR) w tym samym teście poza próbą: PF 1,27, obsunięcie 36%
 
 Uruchomienie:
   python swing_bot.py              -> jeden przebieg (GitHub Actions)
@@ -34,13 +34,18 @@ from zoneinfo import ZoneInfo
 import requests
 
 # ------------------------------- USTAWIENIA -------------------------------
-PAIRS = ["BTC", "ETH", "SOL", "XRP", "HYPE", "DOGE", "AVAX", "LINK", "SUI", "BCH"]
+# pary z kontraktem X-Perp na koncie demo (SOL zniknął z demo w 11.2026)
+PAIRS = ["BTC", "ETH", "XRP", "HYPE", "DOGE", "AVAX", "LINK", "SUI", "BCH", "DOT", "FIL", "NEAR", "UNI"]
 CAPITAL = float(os.getenv("CAPITAL", "99400"))        # kapitał demo w USDC (do sygnałów bez kluczy)
 RISK_PCT = float(os.getenv("RISK_PCT", "0.5"))        # ryzyko na transakcję w %
 LEVERAGE = int(os.getenv("LEVERAGE", "3"))            # dźwignia (marża izolowana)
-DON_N = 20                                             # kanał Donchiana: liczba świec 4H
-STOP_ATR = 2.0                                         # SL startowy = 2 x ATR(14) 4H
-TRAIL_ATR = 5.5                                        # trailing = 5,5 x ATR(14) 4H od zamknięcia
+DON_N = 40                                             # kanał wejścia: liczba świec 4H
+EXIT_N = 20                                            # kanał wyjścia: najniższe low z tylu świec 4H
+TREND_EMA = 200                                        # long tylko nad EMA200 (4H) danej pary
+STOP_ATR = 2.0                                         # SL startowy = 2 x ATR(14) 4H (= 1R)
+HARD_R = 2.0                                           # SL awaryjny na giełdzie: 2R od wejścia
+MAX_SAME_DIR = int(os.getenv("MAX_SAME_DIR", "6"))     # maks. pozycji bota w jedną stronę
+TRAIL_ATR = 5.5                                        # tylko dla starych pozycji (strategia v1)
 BTC_FILTER = int(os.getenv("BTC_FILTER", "0"))         # 1 = long tylko gdy BTC > EMA300 4H, short gdy pod
 BTC_EMA = 300
 H4 = 4 * 3600_000
@@ -167,26 +172,27 @@ def btc_regime(k_btc):
 
 
 def donchian_signal(k4, regime):
-    """Sygnał na ostatniej zamkniętej świecy 4H. Zwraca dict albo None."""
-    if len(k4) < DON_N + 20:
+    """Sygnał LONG na ostatniej zamkniętej świecy 4H. Zwraca dict albo None."""
+    if len(k4) < max(DON_N, TREND_EMA) + 50:
         return None
     last, prev = k4[-1], k4[-1 - DON_N:-1]
-    hi, lo = max(x[2] for x in prev), min(x[3] for x in prev)
-    A = atr(k4)[-1]
-    if last[4] > hi and regime >= 0:
-        d = "long"
-    elif last[4] < lo and regime <= 0:
-        d = "short"
-    else:
+    hi = max(x[2] for x in prev)
+    closes = [x[4] for x in k4]
+    if not (last[4] > hi and last[4] > ema(closes, TREND_EMA)[-1] and regime >= 0):
         return None
-    s = 1 if d == "long" else -1
+    A = atr(k4)[-1]
     entry = last[4]
-    return {"dir": d, "entry": entry, "sl": entry - s * STOP_ATR * A, "dist": STOP_ATR * A,
-            "atr": A, "level": hi if d == "long" else lo, "bar_ts": last[0]}
+    return {"dir": "long", "entry": entry, "sl": entry - STOP_ATR * A, "dist": STOP_ATR * A,
+            "hard_sl": entry - HARD_R * STOP_ATR * A, "atr": A, "level": hi, "bar_ts": last[0]}
+
+
+def exit_level(k4):
+    """Poziom wyjścia v2: najniższe low z EXIT_N ostatnich zamkniętych świec 4H."""
+    return min(x[3] for x in k4[-EXIT_N:])
 
 
 def trail_level(k4, direction):
-    """Nowy poziom trailing stopu po zamkniętej świecy 4H."""
+    """Trailing v1 (tylko stare pozycje): zamknięcie -/+ 5,5 x ATR."""
     A, c = atr(k4)[-1], k4[-1][4]
     return c - TRAIL_ATR * A if direction == "long" else c + TRAIL_ATR * A
 
@@ -208,13 +214,13 @@ def build_message(base, s, inst, ct_val, tick):
     contracts = int(qty_coin / ct_val) if ct_val else None
     arrow = "🟢 LONG" if s["dir"] == "long" else "🔴 SHORT"
     lines = [
-        f"{arrow} {base} — wybicie kanału 20 świec 4H",
+        f"{arrow} {base} — wybicie kanału {DON_N} świec 4H (nad EMA{TREND_EMA})",
         f"Kontrakt: {inst or base + ' X-Perp'}",
         "",
         f"Wejście:  {fmt(s['entry'], tick)}  (rynek)",
-        f"SL:       {fmt(s['sl'], tick)}  (2 x ATR 4H)",
-        f"Trailing: po każdej świecy 4H przesuń SL na zamknięcie {'-' if s['dir'] == 'long' else '+'} 5,5 x ATR "
-        f"(teraz ok. {fmt(TRAIL_ATR * s['atr'])}), bez TP",
+        f"SL:       {fmt(s['sl'], tick)}  (2 x ATR 4H) — zamknij, gdy świeca 4H ZAMKNIE się pod nim",
+        f"SL awaryjny na giełdzie: {fmt(s['hard_sl'], tick)}",
+        f"Wyjście:  po każdej świecy 4H podnieś SL do najniższego low z {EXIT_N} świec (tylko w górę), bez TP",
         "",
         f"Ilość:    {contracts:,} kontraktów".replace(",", " ") if contracts else f"Ilość: {qty_coin:.4f} {base}",
         f"Wartość:  ~{notional:,.0f} USD | marża izolowana {LEVERAGE}x ≈ {notional / LEVERAGE:,.0f} USDC".replace(",", " "),
@@ -295,12 +301,23 @@ def make_trader(st):
 
 # ------------------------------- PRZEBIEG -------------------------------
 def update_trailing(st, trader, k4_by_base, errors):
-    """Po zamknięciu świecy 4H przesuwa SL pozycji bota (tylko w stronę zysku)."""
+    """Po zamknięciu świecy 4H zarządza wyjściem pozycji bota."""
     for inst, t in list(st.get("_trades", {}).items()):
-        if t.get("strategy") != "donchian":
+        if t.get("strategy") not in ("donchian", "donchian2"):
             continue
         k4 = k4_by_base.get(t["base"])
         if not k4 or k4[-1][0] <= t.get("trail_bar", 0):
+            continue
+        if t["strategy"] == "donchian2":
+            # v2: stop na zamknięciu świecy 4H rynku spot (jak w backteście), potem podniesienie poziomu
+            try:
+                if k4[-1][4] <= t["sl"]:
+                    trader.close_trade(inst, t, f"zamknięcie 4H {k4[-1][4]:.6g} pod SL {t['sl']:.6g}")
+                else:
+                    t["sl"] = max(t["sl"], exit_level(k4))
+                t["trail_bar"] = k4[-1][0]
+            except Exception as e:  # noqa: BLE001
+                errors.append(f"AUTO: wyjście {t['base']}: {e}")
             continue
         try:
             new = trail_level(k4, t["dir"])
@@ -344,7 +361,7 @@ def run(dry=False):
         k4_by_base, complete = {}, regime is not None and k_btc[-1][0] == expected
         for base in (PAIRS if regime is not None else []):
             try:
-                k4 = k_btc if base == "BTC" else candles(f"{base}-USDT", "4H", 150)
+                k4 = k_btc if base == "BTC" else candles(f"{base}-USDT", "4H", 600)
                 if not k4 or k4[-1][0] != expected:
                     complete = False                       # OKX jeszcze nie opublikował świecy
                     continue
@@ -389,49 +406,44 @@ def run(dry=False):
     if not dry and os.getenv("GITHUB_EVENT_NAME") == "workflow_dispatch" and not os.getenv("QUIET"):
         auto = (f"Handel automatyczny (demo): WŁĄCZONY, pozycji bota: {len(st.get('_trades', {}))}/{MAX_POSITIONS or 'bez limitu'}"
                 if trader else "Handel automatyczny: wyłączony (brak kluczy OKX)")
-        send_telegram(f"✅ Bot swing działa (test ręczny)\nStrategia: Donchian 4H{' + filtr BTC' if BTC_FILTER else ''}\n{summary}\n{auto}")
+        send_telegram(f"✅ Bot swing działa (test ręczny)\nStrategia: v2 long-only, wybicie {DON_N} świec 4H nad EMA{TREND_EMA}, "
+                      f"wyjście {EXIT_N} świec na zamknięciu 4H{' + filtr BTC' if BTC_FILTER else ''}\n{summary}\n{auto}")
     print(summary)
     for e in errors:
         print("  ", e)
 
 
 # ------------------------------- BACKTEST -------------------------------
-def backtest(bars=3000, fee=0.0008):
-    """Backtest Donchian 4H: wejście na otwarciu następnej świecy, SL 2 ATR, trailing 5,5 ATR, bez limitu pozycji."""
-    k_btc = candles("BTC-USDT", "4H", bars)
-    bc = [x[4] for x in k_btc]
-    be = ema(bc, BTC_EMA)
-    reg = {x[0]: (1 if bc[i] > be[i] else -1) for i, x in enumerate(k_btc)}
+def backtest(bars=3000, fee=0.0008, fund_8h=0.0001):
+    """Backtest v2 na pojedynczych parach: wejście na otwarciu następnej świecy, stop na zamknięciu 4H,
+    SL awaryjny 2R w trakcie świecy, wyjście po kanale EXIT_N. Wynik w R po kosztach (bez limitu pozycji)."""
     total, n_all, wins = 0.0, 0, 0
     for base in PAIRS:
         try:
-            k = k_btc if base == "BTC" else candles(f"{base}-USDT", "4H", bars)
+            k = candles(f"{base}-USDT", "4H", bars)
         except Exception as e:  # noqa: BLE001
             print(base, "błąd:", e)
             continue
-        a, pos, res = atr(k), None, []
-        for i in range(DON_N + BTC_EMA // 4, len(k) - 1):
+        a, c_all = atr(k), [x[4] for x in k]
+        e200 = ema(c_all, TREND_EMA)
+        pos, res = None, []
+        for i in range(max(DON_N, TREND_EMA), len(k) - 1):
             o, h, l, c = k[i][1:5]
             if pos:
-                s = pos["s"]
-                hit = (l <= s) if pos["d"] == 1 else (h >= s)
-                if hit:
-                    px = min(o, s) if pos["d"] == 1 else max(o, s)
-                    res.append((pos["d"] * (px - pos["e"]) - fee * (pos["e"] + px)) / pos["r"])
+                cat = l <= pos["hard"]
+                if cat or c <= pos["s"]:
+                    px = min(o, pos["hard"]) if cat else k[i + 1][1]
+                    bars_held = i - pos["i"] + 1
+                    cost = fee * (pos["e"] + px) + fund_8h * pos["e"] * bars_held / 2
+                    res.append((px - pos["e"] - cost) / pos["r"])
                     pos = None
                 else:
-                    t = c - pos["d"] * TRAIL_ATR * a[i]
-                    pos["s"] = max(s, t) if pos["d"] == 1 else min(s, t)
-            if not pos:
-                r = reg.get(k[i][0], 0) if BTC_FILTER else 0
-                prev = k[i - DON_N:i]
-                d = 1 if (c > max(x[2] for x in prev) and r >= 0) else -1 if (c < min(x[3] for x in prev) and r <= 0) else 0
-                if d:
-                    e = k[i + 1][1]
-                    pos = {"d": d, "e": e, "s": e - d * STOP_ATR * a[i], "r": STOP_ATR * a[i]}
+                    pos["s"] = max(pos["s"], min(x[3] for x in k[i - EXIT_N + 1:i + 1]))
+            if not pos and c > max(x[2] for x in k[i - DON_N:i]) and c > e200[i]:
+                e, r = k[i + 1][1], STOP_ATR * a[i]
+                pos = {"e": e, "s": e - r, "hard": e - HARD_R * r, "r": r, "i": i + 1}
         if pos:
-            px = k[-1][4]
-            res.append((pos["d"] * (px - pos["e"]) - fee * (pos["e"] + px)) / pos["r"])
+            res.append((k[-1][4] - pos["e"] - fee * 2 * pos["e"]) / pos["r"])
         total += sum(res)
         n_all += len(res)
         wins += sum(1 for x in res if x > 0)

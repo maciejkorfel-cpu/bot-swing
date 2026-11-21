@@ -6,8 +6,11 @@ nie jest używane. Klucz API trzeba utworzyć w trybie demo.
 
 Na każdą pozycję bot składa:
   1. zlecenie rynkowe (marża izolowana, dźwignia LEVERAGE),
-  2. SL na całą pozycję (zlecenie warunkowe, tylko redukcja).
-Po każdej zamkniętej świecy 4H swing_bot.py przesuwa SL (trailing 5,5 ATR) przez move_sl().
+  2. SL AWARYJNY na całą pozycję, 2R od wejścia (zlecenie warunkowe, tylko redukcja).
+Właściwy stop (strategia v2) jest "miękki": swing_bot.py po każdej świecy 4H sprawdza
+zamknięcie rynku spot i zamyka pozycję przez close_trade(). Cena kontraktu demo bywa
+przypadkowa, więc ciasny stop na giełdzie demo wybijał pozycje z dużym poślizgiem.
+Stare pozycje (v1) dalej mają trailing 5,5 ATR przez move_sl().
 Gdy pozycja zniknie, anuluje pozostałe zlecenia i wysyła raport.
 """
 import base64
@@ -21,6 +24,7 @@ from datetime import datetime, timezone
 
 DEMO_HEADER = {"x-simulated-trading": "1"}       # zawsze konto demo
 MAX_SLIP_R = float(os.getenv("MAX_SLIP_R", "0.2"))  # maks. poślizg wyjścia z SL jako ułamek ryzyka (0,2 = 0,2R)
+MAX_SAME_DIR = int(os.getenv("MAX_SAME_DIR", "6"))  # maks. pozycji bota w jedną stronę (pary chodzą razem)
 
 
 class OkxDemo:
@@ -113,6 +117,8 @@ class Trader:
             return False, "para niedostępna na OKX w Twoim regionie (ograniczenia prawne) — pomijam"
         if self.max_pos and len(trades) >= self.max_pos:
             return False, f"limit {self.max_pos} pozycji"
+        if MAX_SAME_DIR and sum(1 for t in trades.values() if t["dir"] == s["dir"]) >= MAX_SAME_DIR:
+            return False, f"limit {MAX_SAME_DIR} pozycji w jedną stronę"
         ins = self.instrument(base)
         if not ins:
             return False, "brak kontraktu w demo"
@@ -181,13 +187,15 @@ class Trader:
             raise RuntimeError(f"zlecenie {o.get('ordId')} nie otworzyło pozycji")
         entry = float(pos["avgPx"])
         real_sz = abs(float(pos["pos"]))
-        sl = entry - sgn * dist
+        sl = entry - sgn * dist                              # stop "miękki" (na zamknięciu 4H)
+        hard_r = abs(s["entry"] - s["hard_sl"]) / s["dist"] if s.get("hard_sl") else 1.0
+        hard = entry - sgn * dist * hard_r                   # stop awaryjny na giełdzie
 
         ids = {}
         try:
             ids["sl"] = self._algo(inst, close_side, pos_side,
                                    {"ordType": "conditional", "sz": _round(real_sz, lot),
-                                    "slTriggerPx": _round(sl, tick), "slOrdPx": "-1",
+                                    "slTriggerPx": _round(hard, tick), "slOrdPx": "-1",
                                     # cena "last" w demo bywa przypadkowa (pojedyncze transakcje
                                     # w płytkim order booku), więc stop wyzwalamy ceną mark
                                     "slTriggerPxType": "mark"})
@@ -197,12 +205,14 @@ class Trader:
             raise RuntimeError(f"nie udało się ustawić SL, pozycję zamknięto: {e}") from e
 
         self.st["_trades"][inst] = {"base": base, "dir": s["dir"], "entry": entry, "sl": sl, "sz": real_sz,
-                                    "ids": ids, "be": False, "strategy": "donchian", "tick": tick,
+                                    "ids": ids, "be": False, "tick": tick, "hard_sl": hard,
+                                    "strategy": "donchian2" if s.get("hard_sl") else "donchian",
                                     "risk": round(real_sz * ct * dist, 2),          # 1R w USDC
                                     "trail_bar": s["bar_ts"], "opened_ms": int(time.time() * 1000)}
         return True, (f"{'🟢 LONG' if long_ else '🔴 SHORT'} {base} — OTWARTO AUTOMATYCZNIE (demo)\n"
-                      f"Strategia: wybicie kanału 20 świec 4H\nKontrakt: {inst}\nWejście: {entry}\n"
-                      f"SL: {_round(sl, tick)} (trailing 5,5 ATR po każdej świecy 4H, bez TP)\n"
+                      f"Strategia v2: wybicie kanału 4H nad EMA200\nKontrakt: {inst}\nWejście: {entry}\n"
+                      f"SL: {_round(sl, tick)} na zamknięciu świecy 4H (podnoszony do low z 20 świec), bez TP\n"
+                      f"SL awaryjny na giełdzie: {_round(hard, tick)}\n"
                       f"Ilość: {real_sz:g} kontraktów | ryzyko ~{round(real_sz * ct * dist)} USDC"
                       + ("\n(ilość zmniejszona — płytki order book demo)" if cut else "")
                       + ("\n(ilość ograniczona do maks. wielkości zlecenia OKX)" if capped else ""))
@@ -226,6 +236,13 @@ class Trader:
         self.x.post("/api/v5/trade/amend-algos", {"instId": inst, "algoId": t["ids"]["sl"],
                                                   "newSlTriggerPx": _round(new_sl, tick)})
         t["sl"] = new_sl
+
+    def close_trade(self, inst, t, reason=""):
+        """Zamyka pozycję rynkowo (stop na zamknięciu 4H). Raport i historia trafią w manage()
+        przy kolejnym przebiegu, gdy pozycja zniknie."""
+        pos_side = {"posSide": t["dir"]} if self.hedge else {}
+        self.x.post("/api/v5/trade/close-position", {"instId": inst, "mgnMode": "isolated", **pos_side})
+        t["exit_reason"] = reason
 
     # ---------- zarządzanie ----------
     def manage(self):
@@ -257,7 +274,8 @@ class Trader:
                     pnl += f" ({rec['r']:+.2f} R)"
                 self.st.setdefault("_history", []).append(rec)
                 self.st["_history"] = self.st["_history"][-200:]
-                self.send(f"🏁 {t['base']} {t['dir'].upper()} zamknięta (demo){pnl}")
+                why = f"\nPowód: {t['exit_reason']}" if t.get("exit_reason") else ""
+                self.send(f"🏁 {t['base']} {t['dir'].upper()} zamknięta (demo){pnl}{why}")
                 del trades[inst]
                 continue
             tp1_done = t["ids"].get("tp1") and t["ids"]["tp1"] not in pending
@@ -299,7 +317,9 @@ class Trader:
             p = live.get(inst, {})
             u = float(p.get("upl") or 0)
             total_u += u
-            stage = (f"SL {t['sl']:.6g} (trailing)" if t.get("strategy") == "donchian"
+            stage = (f"SL {t['sl']:.6g} na zamknięciu 4H (awaryjny {t.get('hard_sl', 0):.6g})"
+                     if t.get("strategy") == "donchian2"
+                     else f"SL {t['sl']:.6g} (trailing)" if t.get("strategy") == "donchian"
                      else "SL na wejściu" if t.get("be") else "czeka na TP1")
             lines.append(f"• {t['base']} {t['dir'].upper()} od {t['entry']} | teraz {p.get('markPx', '?')} | "
                          f"{u:+.2f} USDC | {stage}")

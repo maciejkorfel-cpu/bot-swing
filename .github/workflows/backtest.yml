@@ -1,0 +1,32 @@
+name: Backtest Donchian
+
+on:
+  workflow_dispatch:
+    inputs:
+      args:
+        description: "Opcje (np. --short --fee 0.0005)"
+        required: false
+        default: ""
+
+jobs:
+  backtest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas numpy requests
+      - name: Backtest
+        run: python backtest_donchian.py ${{ github.event.inputs.args }} | tee wynik.txt
+      - name: Wynik w podsumowaniu
+        run: |
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat wynik.txt >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wyniki-backtestu
+          path: |
+            wynik.txt
+            trades.csv

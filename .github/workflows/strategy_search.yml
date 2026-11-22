@@ -1,0 +1,25 @@
+name: Strategy Search
+
+on:
+  workflow_dispatch:
+    inputs:
+      args:
+        description: "Opcje (np. --days 1095)"
+        required: false
+        default: ""
+
+jobs:
+  search:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas numpy requests tabulate
+      - run: python strategy_search.py ${{ github.event.inputs.args }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wyniki-strategii
+          path: results.csv

@@ -1,0 +1,4 @@
+day,strategy,inst,bt_trades,demo_trades,matched,bt_sumR,demo_sumR,avg_diff_R,missing_in_demo,extra_in_demo,detail
+2026-11-24,S2,BTC-USDT-SWAP,0,0,0,0,0,0.0,,,
+2026-11-24,S2,ETH-USDT-SWAP,0,0,0,0,0,0.0,,,
+2026-11-24,S2,RAZEM,0,0,0,0,0,0.0,,,

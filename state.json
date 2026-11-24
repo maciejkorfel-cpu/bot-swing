@@ -198,43 +198,25 @@
    "dir": "long",
    "pnl": -470.43813861543754,
    "r": -1.01
+  },
+  {
+   "base": "AVAX",
+   "closed_ms": 1795489837091,
+   "dir": "long",
+   "pnl": -475.67095250000006,
+   "r": -1.03
+  },
+  {
+   "base": "BTC",
+   "closed_ms": 1795489837778,
+   "dir": "long",
+   "pnl": -471.46810547449667,
+   "r": -1.02
   }
  ],
  "_last_4h": 1795464000000,
  "_tg_offset": 22371622,
  "_trades": {
-  "AVAX-USD_UM_XPERP-310801": {
-   "base": "AVAX",
-   "be": false,
-   "dir": "long",
-   "entry": 7.023,
-   "ids": {
-    "sl": "4125426333102125057"
-   },
-   "opened_ms": 1795449685718,
-   "risk": 463.13,
-   "sl": 6.666471243153394,
-   "strategy": "donchian",
-   "sz": 1299.0,
-   "tick": 0.001,
-   "trail_bar": 1795464000000
-  },
-  "BTC-USD_UM_XPERP-310328": {
-   "base": "BTC",
-   "be": false,
-   "dir": "long",
-   "entry": 62746.6,
-   "ids": {
-    "sl": "4125425801734139905"
-   },
-   "opened_ms": 1795449669879,
-   "risk": 463.97,
-   "sl": 59943.16729824544,
-   "strategy": "donchian",
-   "sz": 0.1655,
-   "tick": 0.1,
-   "trail_bar": 1795464000000
-  },
   "DOGE-USD_UM_XPERP-310516": {
    "base": "DOGE",
    "be": false,

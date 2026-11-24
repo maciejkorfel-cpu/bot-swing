@@ -1,0 +1,77 @@
+name: Bot DEMO - S2 + carry C2
+
+# Paper trading na koncie DEMO OKX (nagłówek x-simulated-trading: 1, twarda blokada w demo/okx.py).
+# Zegar: cron GitHuba co 15 min (bywa opóźniony) + opcjonalnie cron-job.org co 5 min (workflow_dispatch na ten plik).
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write                  # zapis demo_state.json i demo_log/*.csv
+
+concurrency:
+  group: demo-bot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - run: pip install -r requirements.txt
+
+      - name: Kontrola sekretow (bez nich bot nie startuje)
+        env:
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
+          OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
+          OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          missing=""
+          for v in OKX_API_KEY OKX_API_SECRET OKX_API_PASSPHRASE TELEGRAM_TOKEN TELEGRAM_CHAT_ID; do
+            [ -z "${!v}" ] && missing="$missing $v"
+          done
+          if [ -n "$missing" ]; then echo "::error::Brak sekretow:$missing — bot nie zostanie uruchomiony"; exit 1; fi
+
+      - name: Testy jednostkowe (czerwone = brak przebiegu)
+        run: python -m unittest discover -s demo/tests -t . -p "test_units.py"
+
+      - name: Przebieg bota (tylko DEMO)
+        env:
+          OKX_DEMO: "1"
+          OKX_API_KEY: ${{ secrets.OKX_API_KEY }}
+          OKX_API_SECRET: ${{ secrets.OKX_API_SECRET }}
+          OKX_API_PASSPHRASE: ${{ secrets.OKX_API_PASSPHRASE }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          OKX_API_HOST: ${{ vars.OKX_API_HOST || 'https://eea.okx.com' }}
+          OKX_PERP_VENUE: ${{ vars.OKX_PERP_VENUE || 'xperp' }}
+          CARRY_FRAC: ${{ vars.CARRY_FRAC || '0.8' }}
+          ENABLE_S2: ${{ vars.ENABLE_S2 || '1' }}
+          ENABLE_CARRY: ${{ vars.ENABLE_CARRY || '1' }}
+        run: python swing_bot.py
+
+      - name: Zapis stanu i dziennika
+        if: always()
+        run: |
+          git config user.name "demo-bot"
+          git config user.email "demo-bot@users.noreply.github.com"
+          git add demo_state.json demo_log/ 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "demo: $(date -u +%F_%H:%M)"
+            for i in 1 2 3; do
+              git pull --rebase -X theirs origin main && git push && break
+              sleep 3
+            done
+          fi

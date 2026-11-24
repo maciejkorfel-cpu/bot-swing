@@ -1,103 +1,61 @@
-# Bot swing: sygnały OKX na Telegram
+# Bot DEMO OKX: S2 + carry C2 (paper trading, 6 miesięcy)
 
-> **Zegar:** cron GitHuba bywa uruchamiany tylko co kilka godzin, dlatego bota co 5 min
-> uruchamia darmowy [cron-job.org](https://cron-job.org) (zapytanie POST do GitHub API,
-> `workflow_dispatch` z `cicho=true`). Cron GitHuba co 15 min zostaje jako zapas.
+> **Tylko konto DEMO.** Każde zapytanie ma nagłówek `x-simulated-trading: 1`. Bot zatrzymuje się bez żadnego zlecenia,
+> gdy `OKX_DEMO` ≠ `1` albo gdy klucz API działa na koncie realnym (sprawdzane przy każdym starcie, `demo/okx.py`).
+> Klucze tylko w GitHub Secrets — repo jest publiczne.
 
-Bez kluczy API OKX bot tylko wysyła sygnały; z kluczami konta demo sam otwiera pozycje. Co 5 minut skanuje 10 par
-(BTC, ETH, SOL, XRP, HYPE, DOGE, AVAX, LINK, SUI, BCH). Gdy setup spełnia wszystkie
-warunki, wysyła na Telegram gotowe dane do zlecenia. Pozycję otwierasz sam w telefonie.
+Stara strategia (Donchian 20 4H) jest wyłączona: `.github/workflows/swing-bot.yml` nie ma harmonogramu, a jego zadanie
+się nie wykonuje. Nowy bot: `.github/workflows/demo-bot.yml` → `python swing_bot.py` → `demo/bot.py`.
 
-## Strategia: wybicie kanału Donchiana 4H
+## Strategie (reguły zamrożone w badaniach, bez zmian)
+**S2** (`research/finalists.py`, `research/STAN_BADAN.md`): tylko LONG, BTC i ETH, świece 4H.
+- Sygnał: zamknięcie 4H > najwyższe high z 55 poprzednich świec **i** > EMA(300 świec 4H ≈ 50 dni).
+- SL = open − 3·ATR14, TP = open + 4·ATR14 (limit), trailing = najwyższe zamknięcie od wejścia − 4·ATR14
+  (po każdej świecy 4H, tylko w górę). SL i TP stoją na giełdzie (zlecenie OCO).
+- Ryzyko 0,5% kapitału S2 na transakcję, nominał ≤ 3× kapitału, wspólne konto BTC+ETH.
+- Wejście (research_edge, część 2): limit post-only po cenie open świecy (≤ bid), ważny 1 h, potem rynek.
+  Gdy cena po 1 h jest już przy TP → transakcja pominięta (jak w modelu).
 
-| Krok | Warunek |
+**Carry C2** (`research_crypto2/finalists_c2.py`): long spot + short perp na tym samym coinie, konto ujednolicone.
+- Uniwersum: top 20 perpów OKX USDT-SWAP wg średniego wolumenu z 30 dni, z parą spot USDT, ≥ 60 dni od listingu.
+- Raz dziennie (po 00:10 UTC): wejście gdy średni funding z 7 dni ≥ 10%/rok (maks. 10 pozycji, malejąco),
+  wyjście gdy < 0. Pozycja = (kapitał carry / 10) / 1,1.
+- Obie nogi jako limit (1 h), potem rynek. Gdy jedna noga się nie wypełni albo zniknie, druga jest zamykana i przychodzi alarm.
+- Odchylenie od backtestu: w demo UE handlujemy X-Perp; coin bez X-Perp/spot w demo jest pomijany
+  (wpis `skipped_no_inst` w `demo_log/carry_demo.csv`).
+
+## Dziennik i porównanie z backtestem (`demo_log/`)
+| plik | zawartość |
 |---|---|
-| Wejście LONG | Zamknięcie świecy 4H powyżej najwyższego high z 20 poprzednich świec |
-| Wejście SHORT | Zamknięcie świecy 4H poniżej najniższego low z 20 poprzednich świec |
-| SL startowy | 2 x ATR(14) z 4H od wejścia |
-| Trailing | Po każdej zamkniętej świecy 4H SL = zamknięcie -/+ 5,5 x ATR, tylko w stronę zysku. Bez TP. |
-| Wielkość | RISK_PCT (domyślnie 0,5%) kapitału ryzyka na transakcję, marża izolowana 3x |
-| Limit pozycji | brak (MAX_POSITIONS=0); jedna pozycja na parę |
-| Filtr BTC | opcjonalny (BTC_FILTER=1): long tylko gdy BTC > EMA300 4H, short tylko pod |
+| `trades_demo.csv` | każda transakcja S2: wejście/wyjście, typ wejścia (maker/taker), opóźnienie, poślizg, wynik w USD i R |
+| `signals_demo.csv` | każdy sygnał S2 i decyzja (wejście, pominięcie, błąd, tryb STOP) |
+| `carry_demo.csv` | otwarcia/zamknięcia carry, otrzymany funding, opłaty, pominięcia |
+| `daily_demo.csv` | dzienne equity, DD, liczba transakcji, suma R, PF, tryb |
+| `compare_demo.csv` | codziennie: backtest S2 (ten sam silnik co research) na tych samych świecach od startu vs demo |
 
-### Wyniki backtestu (dane OKX 4H, X 2023 - X 2026, 9 par z kontraktem demo, prowizje 0,08%/stronę, ryzyko 0,5%)
+## Kryteria wyłączenia (R12) — bot sam przechodzi w tryb STOP i wysyła alarm
+Obsunięcie S2 > 10%; 15 strat z rzędu; suma R po 40 transakcjach < −9 albo po 100 < −10; PF po 100 < 1,0;
+średni poślizg > 0,06%/zlecenie; opóźnienie wejścia > 30 min w > 10% sygnałów; pominięte sygnały > 5%;
+rozbieżność demo vs backtest > 0,3R/transakcję. Carry: obsunięcie > 3% (backtest < 1%).
+STOP = brak nowych wejść; otwarte pozycje zostają z SL/TP na giełdzie. Ręcznie: komenda `/stop` na Telegramie,
+`/status` = podsumowanie. Wznowienie po STOP tylko przez edycję `demo_state.json` (`"mode": "RUN"`) po przeglądzie.
 
-| Wariant | Transakcje | Trafność | PF | Wynik | Obsunięcie | Ostatnie 14 mies. |
-|---|---|---|---|---|---|---|
-| **Bez filtra BTC (domyślny)** | 883 | 26% | 1,59 | +379R (ok. +447%) | 36% | PF 1,31, +49% |
-| Z filtrem BTC | 749 | 24% | 1,50 | +280R (ok. +242%) | 34% | PF 1,07, +7% |
+## Telegram
+Otwarcie i zamknięcie pozycji, codzienne podsumowanie (pierwszy przebieg po północy UTC), alarm przy błędzie
+(maks. raz na 3 h) i przy problemie z nogą carry.
 
-Trafność jest niska: zysk robią nieliczne długie ruchy. Serie 10-20 strat z rzędu są normalne.
-Pary chodzą razem, więc bez limitu bywa otwartych naraz do 9 pozycji w tę samą stronę.
-Na mniejszych altach (DOT, LTC, FIL...) strategia dawała wynik ok. zera.
+## Konfiguracja (GitHub → Settings → Secrets and variables → Actions)
+*Secrets* (wymagane, workflow bez nich kończy się błędem i nic nie robi):
+`OKX_API_KEY`, `OKX_API_SECRET`, `OKX_API_PASSPHRASE` (klucz utworzony w **Demo trading**), `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`.
+*Variables* (opcjonalne): `OKX_API_HOST` (domyślnie `https://eea.okx.com`), `OKX_PERP_VENUE` (`xperp` / `swap`),
+`CARRY_FRAC` (część kapitału demo dla carry, domyślnie 0.8), `ENABLE_S2`, `ENABLE_CARRY` (`1`/`0`).
+Konto demo: carry wymaga trybu **multi-currency margin** albo **portfolio margin**. W innym trybie carry się
+nie uruchomi i przyjdzie alarm.
 
-## Instalacja (ok. 10 minut)
-
-1. **Bot Telegram (osobny, nie ten od nieruchomości)**
-   - W Telegramie napisz do `@BotFather` → `/newbot` → zapisz **token**.
-   - Napisz cokolwiek do nowego bota, potem otwórz w przeglądarce
-     `https://api.telegram.org/bot<TOKEN>/getUpdates` i skopiuj `"chat":{"id": ...}`. To jest **chat_id**.
-
-2. **Repozytorium:** wgraj pliki do repo `bot-krypto`, np. do folderu głównego albo nowego repo `bot-swing`.
-   Musi się tam znaleźć `.github/workflows/swing-bot.yml`.
-
-3. **Sekrety:** Settings → Secrets and variables → Actions
-   - *Secrets*: `TELEGRAM_TOKEN`, `TELEGRAM_CHAT_ID`
-   - *Variables* (opcjonalnie): `CAPITAL` (np. 99400), `RISK_PCT` (0.5), `LEVERAGE` (3)
-
-4. **Test:** zakładka Actions → „Bot swing - sygnaly” → **Run workflow**.
-   W logu ma się pojawić `sygnałów: X | błędów: 0`.
-   - Jeśli są błędy dostępu do OKX (serwery GitHuba stoją w USA, a OKX może je blokować),
-     daj znać. Przeniesiemy bota na VPS w UE albo na Twój komputer.
-
-5. **Backtest** (w Codespaces):
-   ```
-   pip install requests
-   python swing_bot.py --backtest    # ok. 80 dni historii 1H
-   python swing_bot.py --dry         # bieżący skan bez wysyłania
-   ```
-
-## Jak wygląda sygnał
-
+## Testy
 ```
-🔴 SHORT HYPE — sygnał SWING
-Kontrakt: HYPE-USD_UM_XPERP-310801
-
-Wejście:  76.950  (limit lub rynek)
-SL:       77.880
-TP1:      75.555  (1,5R — zamknij 30%, SL przesuń na wejście)
-Trailing: reszta (70%) — aktywacja 75.555, callback 2.4%
-          (bez górnego TP — trailing zamknie pozycję)
-
-Ilość:    5 340 kontraktów
-Wartość:  ~41 100 USD | marża izolowana 3x ≈ 13 700 USDC
-Ryzyko:   ~497 USDC (0.5% kapitału)
-
-Trend 4H (EMA50/200): spadkowy | RSI 1H 44 | ATR 1H 0.62
-Ważny do: 24.10 14:00 — potem nie wchodź
-Przycisk: Sprzedaj (krótkie), zaznacz TP/SL (TP1 na 30% ilości), potem dodaj Trailing stop
-```
-
-Po otrzymaniu sygnału w aplikacji OKX (**Handel demo** → Futures → para):
-1. Izolowane 3x → Z limitem → cena i ilość z sygnału → zaznacz TP/SL: SL z sygnału, TP1 → przycisk z sygnału.
-2. Gdy pozycja wejdzie: **Trailing stop** na 70% ilości, cena aktywacji = TP1, callback z sygnału
-   (opcja „Tylko redukcja”). TP1 ustaw na 30% ilości (zaawansowane TP/SL).
-3. Po TP1 przesuń SL na cenę wejścia.
-
----
-
-## Scalping z Claude (gdy siedzisz przy komputerze)
-
-Otwórz OKX demo w Chrome, panel Claude i wklej:
-
-```
-Sesja scalpingu na OKX demo. Ja składam zlecenia, Ty dajesz sygnały.
-1. Przeskanuj kontrakty X-Perp dostępne na demo (nagłówek x-simulated-trading:1).
-   Wybierz 1–2 z najlepszym stosunkiem ruchu 1m do spreadu.
-2. Na 1m/5m/15m policz EMA9/21/50, RSI, ATR, VWAP i ściany w order booku.
-3. Podaj setup tylko z trendem 15m: wejście z limitem, SL min. 1 ATR(15m),
-   TP1/TP2, R:R min. 1:1,5, ilość kontraktów przy ryzyku 0,25% kapitału, ważność w minutach.
-4. Gdy napiszę „sprawdź”, zweryfikuj formularz zrzutem ekranu, zanim kliknę.
-5. Gdy napiszę „stan”, podaj P&L i co zrobić z SL i TP.
-Zasady: maks. 2 stratne transakcje z rzędu, potem przerwa. Stop czasowy 15 min.
+python -m unittest discover -s demo/tests -t . -p "test_units.py"   # 20 testów (blokada demo, R12, carry, nogi, OCO)
+python -m unittest demo.tests.test_s2_vs_engine -v                 # S2 = research/engine.py (wymaga research/data)
+python -m unittest demo.tests.test_dryrun_replay -v                # na sucho: bot na historii 5m vs backtest (~1 min)
+python swing_bot.py --dry                                          # bez kluczy: bieżący stan reguł S2 i C2
 ```

@@ -1,6 +1,6 @@
 {
- "_last_daily": 20782,
- "_last_run": "2026-11-25 15:56",
+ "_last_daily": 20783,
+ "_last_run": "2026-11-26 00:02",
  "carry": {
   "base": 332023.0916408197,
   "last_day": null,
@@ -14,8 +14,8 @@
  "s2": {
   "base": 415021.73321639426,
   "last_bar": {
-   "BTC-USDT-SWAP": 1795593600000,
-   "ETH-USDT-SWAP": 1795593600000
+   "BTC-USDT-SWAP": 1795636800000,
+   "ETH-USDT-SWAP": 1795636800000
   },
   "mode": "RUN",
   "peak": 415021.73321639426,
